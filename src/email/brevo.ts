@@ -1,7 +1,8 @@
 import * as Brevo from '@getbrevo/brevo';
 import dotenv from 'dotenv';
 
-dotenv.config({ path: '../../.env' });
+// Load .env from shared-modules root (works when run from project root)
+dotenv.config();
 
 const apiInstance = new Brevo.TransactionalEmailsApi();
 apiInstance.setApiKey(

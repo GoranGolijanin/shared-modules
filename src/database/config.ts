@@ -1,7 +1,8 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
 
-dotenv.config({ path: '../../.env' });
+// Load .env from shared-modules root (works when run from project root)
+dotenv.config();
 
 const { Pool } = pg;
 

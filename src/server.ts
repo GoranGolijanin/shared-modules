@@ -3,8 +3,8 @@ import cors from '@fastify/cors';
 import dotenv from 'dotenv';
 import { authPlugin } from './auth/index.js';
 
-// Load environment variables
-dotenv.config({ path: '../.env' });
+// Load .env from shared-modules root (works when run from project root)
+dotenv.config();
 
 const fastify = Fastify({
   logger: true,
