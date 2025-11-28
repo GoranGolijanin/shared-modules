@@ -16,4 +16,5 @@ module.exports = {
   ],
   coverageDirectory: 'coverage',
   verbose: true,
+  silent: true,
 };
