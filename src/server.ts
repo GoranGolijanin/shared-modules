@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import dotenv from 'dotenv';
 import { authPlugin } from './auth/index.js';
+import { webhookRoutes } from './webhook/webhook.routes.js';
 
 // Load .env from shared-modules root (works when run from project root)
 dotenv.config();
@@ -27,6 +28,9 @@ async function start() {
       appUrl: process.env.APP_URL || 'http://localhost:3000',
       cookieSecret: process.env.COOKIE_SECRET || 'your-cookie-secret-change-in-production',
     });
+
+    // Register webhook routes
+    await fastify.register(webhookRoutes);
 
     // Health check endpoint
     fastify.get('/health', async () => {
