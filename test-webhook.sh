@@ -3,7 +3,9 @@
 # Webhook Testing Script
 # This script tests the webhook deployment setup for multiple repositories
 
-set -e
+# Note: We don't use 'set -e' here because we want all tests to run
+# even if some fail. Each test handles its own errors.
+set +e  # Explicitly disable exit-on-error
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -37,7 +39,7 @@ test_result() {
 
 # Test 1: Backend server health check (direct port 3001)
 echo -e "\n${YELLOW}Test 1: Backend Server Health Check (Port 3001)${NC}"
-RESPONSE=$(curl -s http://localhost:3001/health)
+RESPONSE=$(curl -s http://localhost:3001/health 2>&1 || echo "ERROR")
 if echo "$RESPONSE" | grep -q "ok"; then
     test_result 0 "Backend server is running on port 3001"
     echo "  Response: $RESPONSE"
@@ -48,7 +50,7 @@ fi
 
 # Test 2: Webhook health check (direct port 3001)
 echo -e "\n${YELLOW}Test 2: Webhook Endpoint Health Check${NC}"
-RESPONSE=$(curl -s http://localhost:3001/webhook/health)
+RESPONSE=$(curl -s http://localhost:3001/webhook/health 2>&1 || echo "ERROR")
 if echo "$RESPONSE" | grep -q "shared-modules"; then
     test_result 0 "Webhook endpoint is configured correctly"
     echo "  Response: $RESPONSE"
@@ -59,7 +61,7 @@ fi
 
 # Test 3: OpenLiteSpeed proxy test (port 3000 -> 3001)
 echo -e "\n${YELLOW}Test 3: OpenLiteSpeed Proxy (/api/ rewrite)${NC}"
-RESPONSE=$(curl -s http://localhost:3000/api/health 2>&1)
+RESPONSE=$(curl -s http://localhost:3000/api/health 2>&1 || echo "ERROR")
 if echo "$RESPONSE" | grep -q "ok"; then
     test_result 0 "OpenLiteSpeed proxy is working (/api/ -> port 3001)"
     echo "  Response: $RESPONSE"
@@ -70,7 +72,7 @@ fi
 
 # Test 4: Webhook proxy through OpenLiteSpeed
 echo -e "\n${YELLOW}Test 4: Webhook Through Proxy${NC}"
-RESPONSE=$(curl -s http://localhost:3000/api/webhook/health 2>&1)
+RESPONSE=$(curl -s http://localhost:3000/api/webhook/health 2>&1 || echo "ERROR")
 if echo "$RESPONSE" | grep -q "shared-modules"; then
     test_result 0 "Webhook accessible through OpenLiteSpeed proxy"
     echo "  Response: $RESPONSE"
@@ -90,7 +92,7 @@ PAYLOAD='{
 }'
 RESPONSE=$(curl -s -X POST http://localhost:3001/webhook/deploy \
   -H "Content-Type: application/json" \
-  -d "$PAYLOAD")
+  -d "$PAYLOAD" 2>&1 || echo "ERROR")
 
 if echo "$RESPONSE" | grep -q "Deployment started"; then
     test_result 0 "Webhook accepted deployment request for shared-modules"
@@ -111,7 +113,7 @@ PAYLOAD='{
 }'
 RESPONSE=$(curl -s -X POST http://localhost:3001/webhook/deploy \
   -H "Content-Type: application/json" \
-  -d "$PAYLOAD")
+  -d "$PAYLOAD" 2>&1 || echo "ERROR")
 
 if echo "$RESPONSE" | grep -q "Deployment started"; then
     test_result 0 "Webhook accepted deployment request for app-domain-ssl-monitor"
@@ -124,12 +126,12 @@ fi
 # Test 7: Webhook with valid signature (shared-modules)
 echo -e "\n${YELLOW}Test 7: Webhook with Valid Signature (shared-modules)${NC}"
 PAYLOAD='{"ref":"refs/heads/main","repository":{"name":"shared-modules","full_name":"'"$GITHUB_USERNAME"'/shared-modules"}}'
-SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" | sed 's/^.* //')
+SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" 2>/dev/null | sed 's/^.* //')
 
 RESPONSE=$(curl -s -X POST http://localhost:3001/webhook/deploy \
   -H "Content-Type: application/json" \
   -H "X-Hub-Signature-256: sha256=$SIGNATURE" \
-  -d "$PAYLOAD")
+  -d "$PAYLOAD" 2>&1 || echo "ERROR")
 
 if echo "$RESPONSE" | grep -q "Deployment started"; then
     test_result 0 "Webhook signature verification working correctly"
@@ -150,7 +152,7 @@ PAYLOAD='{
 }'
 RESPONSE=$(curl -s -X POST http://localhost:3001/webhook/deploy \
   -H "Content-Type: application/json" \
-  -d "$PAYLOAD")
+  -d "$PAYLOAD" 2>&1 || echo "ERROR")
 
 if echo "$RESPONSE" | grep -q "Ignoring push"; then
     test_result 0 "Webhook correctly ignores non-main branches"
@@ -171,7 +173,7 @@ PAYLOAD='{
 }'
 RESPONSE=$(curl -s -X POST http://localhost:3001/webhook/deploy \
   -H "Content-Type: application/json" \
-  -d "$PAYLOAD")
+  -d "$PAYLOAD" 2>&1 || echo "ERROR")
 
 if echo "$RESPONSE" | grep -q "not configured"; then
     test_result 0 "Webhook correctly rejects unconfigured repositories"
