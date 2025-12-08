@@ -43,7 +43,7 @@ export async function sendVerificationEmail(
   token: string,
   appUrl: string
 ): Promise<boolean> {
-  const verificationUrl = `${appUrl}/auth/verify-email?token=${token}`;
+  const verificationUrl = `${appUrl}/verify-email?token=${token}`;
 
   return sendEmail({
     to: email,
@@ -83,7 +83,7 @@ export async function sendPasswordResetEmail(
   token: string,
   appUrl: string
 ): Promise<boolean> {
-  const resetUrl = `${appUrl}/auth/reset-password?token=${token}`;
+  const resetUrl = `${appUrl}/reset-password?token=${token}`;
 
   return sendEmail({
     to: email,
