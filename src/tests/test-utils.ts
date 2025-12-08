@@ -38,7 +38,7 @@ export function generateTestEmail(): string {
 
 export async function waitForLog(
   queryFn: () => Promise<any>,
-  maxAttempts: number = 10,
+  maxAttempts: number = 50,
   delayMs: number = 100
 ): Promise<any> {
   for (let i = 0; i < maxAttempts; i++) {
@@ -48,5 +48,5 @@ export async function waitForLog(
     }
     await new Promise(resolve => setTimeout(resolve, delayMs));
   }
-  return null;
+  throw new Error(`Log not found after ${maxAttempts} attempts (${maxAttempts * delayMs}ms)`);
 }

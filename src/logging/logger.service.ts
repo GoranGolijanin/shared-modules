@@ -29,7 +29,11 @@ export class LoggerService {
         ]
       );
     } catch (error) {
-      // Fallback to console if database logging fails
+      // In test environment, throw the error so tests can catch it
+      if (process.env.NODE_ENV === 'test') {
+        throw error;
+      }
+      // Fallback to console if database logging fails in production
       console.error('Failed to write to audit log:', error);
       console.log('Log entry:', entry);
     }
