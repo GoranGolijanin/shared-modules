@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { AuthService } from './auth.service.js';
+import { LoggerService } from '../logging/logger.service.js';
 import type {
   RegisterRequest,
   LoginRequest,
@@ -74,11 +75,13 @@ const refreshTokenSchema = {
 };
 
 export function registerAuthRoutes(fastify: FastifyInstance, config: AuthConfig) {
+  const logger = new LoggerService(config.appName);
   const authService = new AuthService(
     config,
     (payload: { userId: string; email: string }, options?: { expiresIn?: string }) =>
       fastify.jwt.sign(payload, options),
-    (token: string) => fastify.jwt.verify(token) as { userId: string; email: string }
+    (token: string) => fastify.jwt.verify(token) as { userId: string; email: string },
+    logger
   );
 
   // Register
@@ -133,7 +136,13 @@ export function registerAuthRoutes(fastify: FastifyInstance, config: AuthConfig)
       const result = await authService.login(email, password);
 
       if (!result.success) {
-        return reply.status(401).send(result);
+        // Pass through all error fields including errorCode and email
+        return reply.status(401).send({
+          success: result.success,
+          message: result.message,
+          errorCode: result.errorCode,
+          email: result.email,
+        });
       }
 
       // Set refresh token as HTTP-only cookie

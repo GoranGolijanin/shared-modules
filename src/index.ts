@@ -9,6 +9,9 @@ export { pool, query, queryOne, execute } from './database/config.js';
 export { sendEmail, sendVerificationEmail, sendPasswordResetEmail } from './email/brevo.js';
 export type { EmailOptions } from './email/brevo.js';
 
+// Logging exports
+export { LoggerService } from './logging/logger.service.js';
+
 // Type exports
 export type {
   User,
@@ -22,4 +25,8 @@ export type {
   VerifyEmailRequest,
   RefreshTokenRequest,
   AuthConfig,
+  AuditLog,
+  LogEntry,
+  LogLevel,
+  AuthErrorCode,
 } from './types/index.js';
