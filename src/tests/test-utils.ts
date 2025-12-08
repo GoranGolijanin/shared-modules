@@ -35,3 +35,18 @@ export function generateTestEmail(): string {
   const random = Math.random().toString(36).substring(7);
   return `test-${timestamp}-${random}@test.com`;
 }
+
+export async function waitForLog(
+  queryFn: () => Promise<any>,
+  maxAttempts: number = 10,
+  delayMs: number = 100
+): Promise<any> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const result = await queryFn();
+    if (result) {
+      return result;
+    }
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+  return null;
+}

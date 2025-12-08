@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import { createTestServer, cleanupTestData, closeDatabase, generateTestEmail } from './test-utils';
+import { createTestServer, cleanupTestData, closeDatabase, generateTestEmail, waitForLog } from './test-utils';
 import { execute, queryOne } from '../database/config';
 import type { AuditLog, EmailVerificationAttempt } from '../types/index';
 
@@ -234,14 +234,16 @@ describe('Auth UX Features', () => {
       });
 
       // Check audit log
-      const log = await queryOne<AuditLog>(
-        `SELECT * FROM audit_logs
-         WHERE app_name = 'test-app'
-         AND user_email = $1
-         AND action = 'login'
-         AND log_level = 'warn'
-         ORDER BY created_at DESC LIMIT 1`,
-        [testEmail.toLowerCase()]
+      const log = await waitForLog(() =>
+        queryOne<AuditLog>(
+          `SELECT * FROM audit_logs
+           WHERE app_name = 'test-app'
+           AND user_email = $1
+           AND action = 'login'
+           AND log_level = 'warn'
+           ORDER BY created_at DESC LIMIT 1`,
+          [testEmail.toLowerCase()]
+        )
       );
 
       expect(log).toBeDefined();
@@ -418,14 +420,16 @@ describe('Auth UX Features', () => {
       });
 
       // Check for warning log
-      const log = await queryOne<AuditLog>(
-        `SELECT * FROM audit_logs
-         WHERE app_name = 'test-app'
-         AND user_email = $1
-         AND action = 'login'
-         AND message LIKE '%rate limit%'
-         ORDER BY created_at DESC LIMIT 1`,
-        [testEmail.toLowerCase()]
+      const log = await waitForLog(() =>
+        queryOne<AuditLog>(
+          `SELECT * FROM audit_logs
+           WHERE app_name = 'test-app'
+           AND user_email = $1
+           AND action = 'login'
+           AND message LIKE '%rate limit%'
+           ORDER BY created_at DESC LIMIT 1`,
+          [testEmail.toLowerCase()]
+        )
       );
 
       expect(log).toBeDefined();
@@ -443,13 +447,15 @@ describe('Auth UX Features', () => {
 
       const body = JSON.parse(response.body);
 
-      const log = await queryOne<AuditLog>(
-        `SELECT * FROM audit_logs
-         WHERE app_name = 'test-app'
-         AND user_email = $1
-         AND action = 'register'
-         AND log_level = 'info'`,
-        [testEmail.toLowerCase()]
+      const log = await waitForLog(() =>
+        queryOne<AuditLog>(
+          `SELECT * FROM audit_logs
+           WHERE app_name = 'test-app'
+           AND user_email = $1
+           AND action = 'register'
+           AND log_level = 'info'`,
+          [testEmail.toLowerCase()]
+        )
       );
 
       expect(log).toBeDefined();
@@ -472,13 +478,15 @@ describe('Auth UX Features', () => {
         payload: { email: testEmail, password: 'TestPassword123!' },
       });
 
-      const log = await queryOne<AuditLog>(
-        `SELECT * FROM audit_logs
-         WHERE app_name = 'test-app'
-         AND user_email = $1
-         AND action = 'register'
-         AND log_level = 'error'`,
-        [testEmail.toLowerCase()]
+      const log = await waitForLog(() =>
+        queryOne<AuditLog>(
+          `SELECT * FROM audit_logs
+           WHERE app_name = 'test-app'
+           AND user_email = $1
+           AND action = 'register'
+           AND log_level = 'error'`,
+          [testEmail.toLowerCase()]
+        )
       );
 
       expect(log).toBeDefined();
@@ -506,13 +514,15 @@ describe('Auth UX Features', () => {
         payload: { email: testEmail, password: 'TestPassword123!' },
       });
 
-      const log = await queryOne<AuditLog>(
-        `SELECT * FROM audit_logs
-         WHERE app_name = 'test-app'
-         AND user_email = $1
-         AND action = 'login'
-         AND log_level = 'info'`,
-        [testEmail.toLowerCase()]
+      const log = await waitForLog(() =>
+        queryOne<AuditLog>(
+          `SELECT * FROM audit_logs
+           WHERE app_name = 'test-app'
+           AND user_email = $1
+           AND action = 'login'
+           AND log_level = 'info'`,
+          [testEmail.toLowerCase()]
+        )
       );
 
       expect(log).toBeDefined();
@@ -539,13 +549,15 @@ describe('Auth UX Features', () => {
         payload: { email: testEmail, password: 'WrongPassword!' },
       });
 
-      const log = await queryOne<AuditLog>(
-        `SELECT * FROM audit_logs
-         WHERE app_name = 'test-app'
-         AND user_email = $1
-         AND action = 'login'
-         AND log_level = 'error'`,
-        [testEmail.toLowerCase()]
+      const log = await waitForLog(() =>
+        queryOne<AuditLog>(
+          `SELECT * FROM audit_logs
+           WHERE app_name = 'test-app'
+           AND user_email = $1
+           AND action = 'login'
+           AND log_level = 'error'`,
+          [testEmail.toLowerCase()]
+        )
       );
 
       expect(log).toBeDefined();
@@ -582,13 +594,15 @@ describe('Auth UX Features', () => {
         cookies: { refreshToken: refreshCookie?.value || '' },
       });
 
-      const log = await queryOne<AuditLog>(
-        `SELECT * FROM audit_logs
-         WHERE app_name = 'test-app'
-         AND user_email = $1
-         AND action = 'logout'
-         AND log_level = 'info'`,
-        [testEmail.toLowerCase()]
+      const log = await waitForLog(() =>
+        queryOne<AuditLog>(
+          `SELECT * FROM audit_logs
+           WHERE app_name = 'test-app'
+           AND user_email = $1
+           AND action = 'logout'
+           AND log_level = 'info'`,
+          [testEmail.toLowerCase()]
+        )
       );
 
       expect(log).toBeDefined();

@@ -233,7 +233,7 @@ describe('Auth Module', () => {
 
       expect(response.statusCode).toBe(401);
       const body = JSON.parse(response.body);
-      expect(body.message).toContain('verify your email');
+      expect(body.message).toContain('sent you a new verification link');
     });
   });
 

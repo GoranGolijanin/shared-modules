@@ -1,6 +1,6 @@
 import { LoggerService } from '../logging/logger.service';
 import { queryOne, execute } from '../database/config';
-import { closeDatabase } from './test-utils';
+import { closeDatabase, waitForLog } from './test-utils';
 import type { AuditLog } from '../types/index';
 
 describe('Logger Service', () => {
@@ -31,9 +31,11 @@ describe('Logger Service', () => {
         user_id: 'test-user-id-123',
       });
 
-      const log = await queryOne<AuditLog>(
-        'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2 ORDER BY created_at DESC LIMIT 1',
-        [testAppName, 'test_action']
+      const log = await waitForLog(() =>
+        queryOne<AuditLog>(
+          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2 ORDER BY created_at DESC LIMIT 1',
+          [testAppName, 'test_action']
+        )
       );
 
       expect(log).toBeDefined();
@@ -52,9 +54,11 @@ describe('Logger Service', () => {
         metadata: { fields: ['name', 'email'], old_email: 'old@test.com' },
       });
 
-      const log = await queryOne<AuditLog>(
-        'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
-        [testAppName, 'user_update']
+      const log = await waitForLog(() =>
+        queryOne<AuditLog>(
+          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
+          [testAppName, 'user_update']
+        )
       );
 
       expect(log).toBeDefined();
@@ -71,9 +75,11 @@ describe('Logger Service', () => {
         user_agent: 'Mozilla/5.0',
       });
 
-      const log = await queryOne<AuditLog>(
-        'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
-        [testAppName, 'login']
+      const log = await waitForLog(() =>
+        queryOne<AuditLog>(
+          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
+          [testAppName, 'login']
+        )
       );
 
       expect(log).toBeDefined();
@@ -91,9 +97,11 @@ describe('Logger Service', () => {
         user_email: 'user@test.com',
       });
 
-      const log = await queryOne<AuditLog>(
-        'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
-        [testAppName, 'payment_failed']
+      const log = await waitForLog(() =>
+        queryOne<AuditLog>(
+          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
+          [testAppName, 'payment_failed']
+        )
       );
 
       expect(log).toBeDefined();
@@ -112,9 +120,11 @@ describe('Logger Service', () => {
         error_stack: error.stack,
       });
 
-      const log = await queryOne<AuditLog>(
-        'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
-        [testAppName, 'test_error']
+      const log = await waitForLog(() =>
+        queryOne<AuditLog>(
+          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
+          [testAppName, 'test_error']
+        )
       );
 
       expect(log).toBeDefined();
@@ -130,9 +140,11 @@ describe('Logger Service', () => {
         metadata: { endpoint: '/api/users', timeout: 5000 },
       });
 
-      const log = await queryOne<AuditLog>(
-        'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
-        [testAppName, 'api_error']
+      const log = await waitForLog(() =>
+        queryOne<AuditLog>(
+          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
+          [testAppName, 'api_error']
+        )
       );
 
       expect(log).toBeDefined();
@@ -149,9 +161,11 @@ describe('Logger Service', () => {
         metadata: { current_count: 8, max_count: 10 },
       });
 
-      const log = await queryOne<AuditLog>(
-        'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
-        [testAppName, 'rate_limit_warning']
+      const log = await waitForLog(() =>
+        queryOne<AuditLog>(
+          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
+          [testAppName, 'rate_limit_warning']
+        )
       );
 
       expect(log).toBeDefined();
@@ -168,9 +182,11 @@ describe('Logger Service', () => {
         metadata: { step: 1, data: 'test' },
       });
 
-      const log = await queryOne<AuditLog>(
-        'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
-        [testAppName, 'test_debug']
+      const log = await waitForLog(() =>
+        queryOne<AuditLog>(
+          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
+          [testAppName, 'test_debug']
+        )
       );
 
       expect(log).toBeDefined();
@@ -193,14 +209,18 @@ describe('Logger Service', () => {
         message: 'App 2 message',
       });
 
-      const app1Logs = await queryOne<AuditLog>(
-        'SELECT * FROM audit_logs WHERE app_name = $1',
-        ['app1']
+      const app1Logs = await waitForLog(() =>
+        queryOne<AuditLog>(
+          'SELECT * FROM audit_logs WHERE app_name = $1',
+          ['app1']
+        )
       );
 
-      const app2Logs = await queryOne<AuditLog>(
-        'SELECT * FROM audit_logs WHERE app_name = $1',
-        ['app2']
+      const app2Logs = await waitForLog(() =>
+        queryOne<AuditLog>(
+          'SELECT * FROM audit_logs WHERE app_name = $1',
+          ['app2']
+        )
       );
 
       expect(app1Logs).toBeDefined();
@@ -225,9 +245,11 @@ describe('Logger Service', () => {
 
       const after = new Date();
 
-      const log = await queryOne<AuditLog>(
-        'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
-        [testAppName, 'timestamp_test']
+      const log = await waitForLog(() =>
+        queryOne<AuditLog>(
+          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
+          [testAppName, 'timestamp_test']
+        )
       );
 
       expect(log).toBeDefined();
