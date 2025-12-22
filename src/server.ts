@@ -21,6 +21,7 @@ async function start() {
 
     // Register auth plugin
     await fastify.register(authPlugin, {
+      appName: process.env.APP_NAME || 'shared-modules',
       jwtSecret: process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production',
       jwtExpiresIn: '15m',
       refreshTokenExpiresIn: '7d',

@@ -126,7 +126,7 @@ const getRepositoryConfig = (repoName: string): RepositoryConfig | null => {
 
 export async function webhookRoutes(fastify: FastifyInstance) {
   // GitHub webhook endpoint
-  fastify.post('/webhook/deploy', async (request: WebhookRequest, reply: FastifyReply) => {
+  fastify.post<{ Body: WebhookPayload }>('/webhook/deploy', async (request, reply) => {
     try {
       const signature = request.headers['x-hub-signature-256'] as string;
       const payload = JSON.stringify(request.body);
@@ -196,11 +196,11 @@ export async function webhookRoutes(fastify: FastifyInstance) {
       })
         .then(({ stdout, stderr }) => {
           fastify.log.info(`Deployment completed successfully for ${repoName}`);
-          if (stdout) fastify.log.info('STDOUT:', stdout.substring(0, 1000)); // Limit log size
-          if (stderr) fastify.log.warn('STDERR:', stderr.substring(0, 1000));
+          if (stdout) fastify.log.info(`STDOUT: ${stdout.substring(0, 1000)}`); // Limit log size
+          if (stderr) fastify.log.warn(`STDERR: ${stderr.substring(0, 1000)}`);
         })
-        .catch((error) => {
-          fastify.log.error(`Deployment failed for ${repoName}:`, error.message);
+        .catch((error: Error) => {
+          fastify.log.error(`Deployment failed for ${repoName}: ${error.message}`);
         });
 
       // Respond immediately to GitHub
@@ -212,7 +212,8 @@ export async function webhookRoutes(fastify: FastifyInstance) {
       });
 
     } catch (error) {
-      fastify.log.error('Webhook error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      fastify.log.error(`Webhook error: ${errorMessage}`);
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });

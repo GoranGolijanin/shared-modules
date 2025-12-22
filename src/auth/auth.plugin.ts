@@ -18,6 +18,7 @@ declare module '@fastify/jwt' {
 }
 
 export interface AuthPluginOptions {
+  appName: string;
   jwtSecret: string;
   jwtExpiresIn?: string;
   refreshTokenExpiresIn?: string;
@@ -28,6 +29,7 @@ export interface AuthPluginOptions {
 
 export async function authPlugin(fastify: FastifyInstance, options: AuthPluginOptions) {
   const config: AuthConfig = {
+    appName: options.appName,
     jwtSecret: options.jwtSecret,
     jwtExpiresIn: options.jwtExpiresIn || '15m',
     refreshTokenExpiresIn: options.refreshTokenExpiresIn || '7d',
