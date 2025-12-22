@@ -1,9 +1,25 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { createHmac } from 'crypto';
-import { exec } from 'child_process';
+import { createHmac, timingSafeEqual } from 'crypto';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { existsSync } from 'fs';
+import { resolve, isAbsolute } from 'path';
 
-const execAsync = promisify(exec);
+// Use execFile instead of exec - prevents shell injection attacks
+const execFileAsync = promisify(execFile);
+
+// SECURITY: Whitelist of allowed repository names (prevents injection via repo name)
+const ALLOWED_REPOSITORIES = new Set([
+  'shared-modules',
+  'app-domain-ssl-monitor'
+]);
+
+// SECURITY: Whitelist of allowed deploy script paths (absolute paths only)
+const ALLOWED_DEPLOY_SCRIPTS = new Set([
+  '/home/www/apps/shared-modules/deploy.sh',
+  '/home/www/apps/app-domain-ssl-monitor/frontend/deploy.sh',
+  // Add other trusted paths here
+]);
 
 interface WebhookPayload {
   ref?: string;
@@ -23,32 +39,89 @@ interface RepositoryConfig {
   projectPath: string;
 }
 
-// Repository deployment configuration
-// Can be configured via environment variables
-const getRepositoryConfig = (repoName: string): RepositoryConfig | null => {
-  // Load repository configurations from environment variables
-  const configs = process.env.REPO_CONFIGS ? JSON.parse(process.env.REPO_CONFIGS) : {};
-
-  // Return specific config if exists
-  if (configs[repoName]) {
-    return configs[repoName];
+// SECURITY: Validate deploy script path against whitelist
+function isDeployScriptAllowed(scriptPath: string): boolean {
+  if (!scriptPath || typeof scriptPath !== 'string') {
+    return false;
   }
 
-  // Default fallback configurations based on known repository names
-  const defaultConfigs: Record<string, RepositoryConfig> = {
+  // Must be absolute path
+  if (!isAbsolute(scriptPath)) {
+    return false;
+  }
+
+  // Resolve to prevent path traversal (../)
+  const resolvedPath = resolve(scriptPath);
+
+  // Must be in whitelist
+  if (!ALLOWED_DEPLOY_SCRIPTS.has(resolvedPath)) {
+    return false;
+  }
+
+  // Must exist on filesystem
+  if (!existsSync(resolvedPath)) {
+    return false;
+  }
+
+  return true;
+}
+
+// SECURITY: Constant-time signature comparison to prevent timing attacks
+function verifySignature(payload: string, signature: string, secret: string): boolean {
+  if (!signature || !secret) {
+    return false;
+  }
+
+  const hmac = createHmac('sha256', secret);
+  const expectedSignature = 'sha256=' + hmac.update(payload).digest('hex');
+
+  // Both must be same length for timingSafeEqual
+  if (signature.length !== expectedSignature.length) {
+    return false;
+  }
+
+  try {
+    return timingSafeEqual(
+      Buffer.from(signature, 'utf8'),
+      Buffer.from(expectedSignature, 'utf8')
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Repository deployment configuration
+// SECURITY: Hardcoded configs only - no dynamic loading from env for script paths
+const getRepositoryConfig = (repoName: string): RepositoryConfig | null => {
+  // SECURITY: Only allow whitelisted repository names
+  if (!ALLOWED_REPOSITORIES.has(repoName)) {
+    return null;
+  }
+
+  // SECURITY: Hardcoded configurations - deploy script paths are NOT configurable via env
+  // This prevents attackers from injecting malicious scripts via environment manipulation
+  const configs: Record<string, RepositoryConfig> = {
     'shared-modules': {
-      deployScript: process.env.SHARED_MODULES_DEPLOY_SCRIPT || '/path/to/shared-modules/deploy.sh',
+      deployScript: '/home/www/apps/shared-modules/deploy.sh',
       deployBranch: process.env.SHARED_MODULES_DEPLOY_BRANCH || 'main',
-      projectPath: process.env.SHARED_MODULES_PATH || '/path/to/shared-modules'
+      projectPath: '/home/www/apps/shared-modules'
     },
     'app-domain-ssl-monitor': {
-      deployScript: process.env.FRONTEND_DEPLOY_SCRIPT || '/path/to/app-domain-ssl-monitor/frontend/deploy.sh',
+      deployScript: '/home/www/apps/app-domain-ssl-monitor/frontend/deploy.sh',
       deployBranch: process.env.FRONTEND_DEPLOY_BRANCH || 'main',
-      projectPath: process.env.FRONTEND_PATH || '/path/to/app-domain-ssl-monitor/frontend'
+      projectPath: '/home/www/apps/app-domain-ssl-monitor/frontend'
     }
   };
 
-  return defaultConfigs[repoName] || null;
+  const config = configs[repoName];
+
+  // SECURITY: Validate the deploy script is allowed before returning
+  if (config && !isDeployScriptAllowed(config.deployScript)) {
+    console.error(`[SECURITY] Deploy script not allowed or not found: ${config.deployScript}`);
+    return null;
+  }
+
+  return config || null;
 };
 
 export async function webhookRoutes(fastify: FastifyInstance) {
@@ -59,23 +132,34 @@ export async function webhookRoutes(fastify: FastifyInstance) {
       const payload = JSON.stringify(request.body);
       const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
 
-      // Verify webhook signature for security
-      if (webhookSecret && signature) {
-        const hmac = createHmac('sha256', webhookSecret);
-        const digest = 'sha256=' + hmac.update(payload).digest('hex');
+      // SECURITY: Webhook secret is MANDATORY - fail if not configured
+      if (!webhookSecret) {
+        fastify.log.error('[SECURITY] GITHUB_WEBHOOK_SECRET not configured - rejecting all webhooks');
+        return reply.code(503).send({ error: 'Webhook not configured' });
+      }
 
-        if (signature !== digest) {
-          fastify.log.error('Invalid webhook signature');
-          return reply.code(401).send({ error: 'Invalid signature' });
-        }
-      } else if (!webhookSecret) {
-        fastify.log.warn('GITHUB_WEBHOOK_SECRET not set - webhook signature verification disabled');
+      // SECURITY: Signature is MANDATORY
+      if (!signature) {
+        fastify.log.error('[SECURITY] Missing webhook signature');
+        return reply.code(401).send({ error: 'Missing signature' });
+      }
+
+      // SECURITY: Verify signature using constant-time comparison
+      if (!verifySignature(payload, signature, webhookSecret)) {
+        fastify.log.error('[SECURITY] Invalid webhook signature - possible attack attempt');
+        return reply.code(401).send({ error: 'Invalid signature' });
       }
 
       // Get repository name from the payload
       const repoName = request.body.repository?.name;
-      if (!repoName) {
+      if (!repoName || typeof repoName !== 'string') {
         return reply.code(400).send({ error: 'Repository name not found in payload' });
+      }
+
+      // SECURITY: Validate repository name against whitelist
+      if (!ALLOWED_REPOSITORIES.has(repoName)) {
+        fastify.log.warn(`[SECURITY] Rejected webhook for non-whitelisted repository: ${repoName}`);
+        return reply.code(403).send({ error: 'Repository not allowed' });
       }
 
       // Get repository configuration
@@ -102,15 +186,21 @@ export async function webhookRoutes(fastify: FastifyInstance) {
 
       fastify.log.info(`Starting deployment for ${repoName} from branch ${branch}...`);
 
-      // Run deployment in the background to avoid timeout
-      execAsync(repoConfig.deployScript)
+      // SECURITY: Use execFile instead of exec - prevents shell injection
+      // execFile does NOT spawn a shell, so command injection is not possible
+      // The script path is already validated against whitelist in getRepositoryConfig
+      execFileAsync('/bin/bash', [repoConfig.deployScript], {
+        cwd: repoConfig.projectPath,
+        timeout: 300000, // 5 minute timeout
+        maxBuffer: 10 * 1024 * 1024, // 10MB max output
+      })
         .then(({ stdout, stderr }) => {
           fastify.log.info(`Deployment completed successfully for ${repoName}`);
-          fastify.log.info('STDOUT:', stdout);
-          if (stderr) fastify.log.warn('STDERR:', stderr);
+          if (stdout) fastify.log.info('STDOUT:', stdout.substring(0, 1000)); // Limit log size
+          if (stderr) fastify.log.warn('STDERR:', stderr.substring(0, 1000));
         })
         .catch((error) => {
-          fastify.log.error(`Deployment failed for ${repoName}:`, error);
+          fastify.log.error(`Deployment failed for ${repoName}:`, error.message);
         });
 
       // Respond immediately to GitHub
