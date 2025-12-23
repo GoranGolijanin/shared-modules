@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import fp from 'fastify-plugin';
 import { SubscriptionService } from '../subscription/subscription.service.js';
 import { UsageService } from '../usage/usage.service.js';
 import { LoggerService } from '../logging/logger.service.js';
@@ -53,7 +54,7 @@ function createLimitError(
  * - checkSlackAccess: Verify user has access to Slack alerts feature
  * - trackApiRequest: Increment API request counter
  */
-export async function planLimitsPlugin(
+async function planLimitsPluginFn(
   fastify: FastifyInstance,
   options: PlanLimitsPluginOptions
 ) {
@@ -270,5 +271,11 @@ export async function planLimitsPlugin(
     }
   });
 }
+
+export const planLimitsPlugin = fp(planLimitsPluginFn, {
+  name: 'plan-limits-plugin',
+  fastify: '5.x',
+  dependencies: ['auth-plugin'],
+});
 
 export default planLimitsPlugin;

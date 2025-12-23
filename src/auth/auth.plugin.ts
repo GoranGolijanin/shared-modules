@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import fp from 'fastify-plugin';
 import fastifyJwt from '@fastify/jwt';
 import fastifyCookie from '@fastify/cookie';
 import { registerAuthRoutes } from './auth.routes.js';
@@ -29,7 +30,7 @@ export interface AuthPluginOptions {
   routePrefix?: string;
 }
 
-export async function authPlugin(fastify: FastifyInstance, options: AuthPluginOptions) {
+async function authPluginFn(fastify: FastifyInstance, options: AuthPluginOptions) {
   const config: AuthConfig = {
     appName: options.appName,
     jwtSecret: options.jwtSecret,
@@ -71,5 +72,10 @@ export async function authPlugin(fastify: FastifyInstance, options: AuthPluginOp
     registerAuthRoutes(fastify, config);
   }
 }
+
+export const authPlugin = fp(authPluginFn, {
+  name: 'auth-plugin',
+  fastify: '5.x',
+});
 
 export default authPlugin;
