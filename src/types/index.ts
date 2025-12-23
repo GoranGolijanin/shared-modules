@@ -125,3 +125,124 @@ export interface AuthConfig {
   bcryptRounds: number;
   appUrl: string;
 }
+
+// ============================================
+// Subscription & Usage Types
+// ============================================
+
+export enum SubscriptionStatus {
+  ACTIVE = 'active',
+  CANCELLED = 'cancelled',
+  EXPIRED = 'expired',
+}
+
+export enum BillingCycle {
+  MONTHLY = 'monthly',
+  ANNUAL = 'annual',
+}
+
+export enum TeamRole {
+  ADMIN = 'admin',
+  MEMBER = 'member',
+  VIEWER = 'viewer',
+}
+
+export enum PlanLimitErrorCode {
+  DOMAIN_LIMIT_REACHED = 'DOMAIN_LIMIT_REACHED',
+  TEAM_LIMIT_REACHED = 'TEAM_LIMIT_REACHED',
+  SMS_LIMIT_REACHED = 'SMS_LIMIT_REACHED',
+  API_LIMIT_REACHED = 'API_LIMIT_REACHED',
+  FEATURE_NOT_AVAILABLE = 'FEATURE_NOT_AVAILABLE',
+}
+
+export interface SubscriptionPlan {
+  id: string;
+  name: string;
+  max_domains: number;
+  max_team_members: number;
+  check_interval_hours: number;
+  api_requests_per_month: number | null;
+  sms_alerts_per_month: number | null;
+  email_alerts: boolean;
+  slack_alerts: boolean;
+  created_at: Date;
+}
+
+export interface UserSubscription {
+  id: string;
+  user_id: string;
+  plan_id: string;
+  status: SubscriptionStatus;
+  started_at: Date;
+  expires_at: Date | null;
+  billing_cycle: BillingCycle | null;
+  stripe_subscription_id: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface UserSubscriptionWithPlan extends UserSubscription {
+  plan: SubscriptionPlan;
+}
+
+export interface UsageTracking {
+  id: string;
+  user_id: string;
+  month_year: string;
+  api_requests: number;
+  sms_alerts_sent: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface TeamMember {
+  id: string;
+  owner_user_id: string;
+  member_user_id: string;
+  role: TeamRole;
+  invited_at: Date;
+  accepted_at: Date | null;
+}
+
+export interface TeamMemberWithUser extends TeamMember {
+  member_email: string;
+}
+
+// Convenience type for current usage vs limits
+export interface UsageLimits {
+  plan: string;
+  domains: {
+    used: number;
+    limit: number;
+    unlimited: boolean;
+  };
+  teamMembers: {
+    used: number;
+    limit: number;
+    unlimited: boolean;
+  };
+  apiRequests: {
+    used: number;
+    limit: number | null;
+    unlimited: boolean;
+  };
+  smsAlerts: {
+    used: number;
+    limit: number | null;
+    unlimited: boolean;
+  };
+  features: {
+    emailAlerts: boolean;
+    smsAlerts: boolean;
+    slackAlerts: boolean;
+  };
+  checkIntervalHours: number;
+}
+
+export interface PlanLimitError {
+  error: PlanLimitErrorCode;
+  message: string;
+  current?: number;
+  limit?: number;
+  upgradeUrl: string;
+}

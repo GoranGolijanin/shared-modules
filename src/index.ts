@@ -12,6 +12,16 @@ export type { EmailOptions } from './email/brevo.js';
 // Logging exports
 export { LoggerService } from './logging/logger.service.js';
 
+// Subscription exports
+export { SubscriptionService } from './subscription/index.js';
+
+// Usage exports
+export { UsageService } from './usage/index.js';
+
+// Middleware exports
+export { planLimitsPlugin } from './middleware/index.js';
+export type { PlanLimitsPluginOptions } from './middleware/index.js';
+
 // Type exports
 export type {
   User,
@@ -29,4 +39,23 @@ export type {
   LogEntry,
   LogLevel,
   AuthErrorCode,
+} from './types/index.js';
+
+// Subscription & Usage type exports
+export {
+  SubscriptionStatus,
+  BillingCycle,
+  TeamRole,
+  PlanLimitErrorCode,
+} from './types/index.js';
+
+export type {
+  SubscriptionPlan,
+  UserSubscription,
+  UserSubscriptionWithPlan,
+  UsageTracking,
+  TeamMember,
+  TeamMemberWithUser,
+  UsageLimits,
+  PlanLimitError,
 } from './types/index.js';

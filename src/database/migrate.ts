@@ -51,6 +51,58 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Subscription plans table (shared across all apps)
+CREATE TABLE IF NOT EXISTS subscription_plans (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(50) NOT NULL UNIQUE,
+  max_domains INTEGER NOT NULL DEFAULT 10,
+  max_team_members INTEGER NOT NULL DEFAULT 1,
+  check_interval_hours INTEGER NOT NULL DEFAULT 12,
+  api_requests_per_month INTEGER,
+  sms_alerts_per_month INTEGER,
+  email_alerts BOOLEAN DEFAULT TRUE,
+  slack_alerts BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- User subscriptions table
+CREATE TABLE IF NOT EXISTS user_subscriptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  plan_id UUID NOT NULL REFERENCES subscription_plans(id),
+  status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'cancelled', 'expired')),
+  started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  expires_at TIMESTAMP WITH TIME ZONE,
+  billing_cycle VARCHAR(10) CHECK (billing_cycle IN ('monthly', 'annual')),
+  stripe_subscription_id VARCHAR(255),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id)
+);
+
+-- Usage tracking table (monthly usage per user)
+CREATE TABLE IF NOT EXISTS usage_tracking (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  month_year VARCHAR(7) NOT NULL,
+  api_requests INTEGER DEFAULT 0,
+  sms_alerts_sent INTEGER DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, month_year)
+);
+
+-- Team members table
+CREATE TABLE IF NOT EXISTS team_members (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  member_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role VARCHAR(20) DEFAULT 'member' CHECK (role IN ('admin', 'member', 'viewer')),
+  invited_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  accepted_at TIMESTAMP WITH TIME ZONE,
+  UNIQUE(owner_user_id, member_user_id)
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_email_verification_token ON users(email_verification_token);
@@ -64,6 +116,11 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_user_email ON audit_logs(user_email);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_id ON user_subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_subscriptions_plan_id ON user_subscriptions(plan_id);
+CREATE INDEX IF NOT EXISTS idx_usage_tracking_user_month ON usage_tracking(user_id, month_year);
+CREATE INDEX IF NOT EXISTS idx_team_members_owner ON team_members(owner_user_id);
+CREATE INDEX IF NOT EXISTS idx_team_members_member ON team_members(member_user_id);
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -78,6 +135,18 @@ $$ language 'plpgsql';
 DROP TRIGGER IF EXISTS update_users_updated_at ON users;
 CREATE TRIGGER update_users_updated_at
   BEFORE UPDATE ON users
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_user_subscriptions_updated_at ON user_subscriptions;
+CREATE TRIGGER update_user_subscriptions_updated_at
+  BEFORE UPDATE ON user_subscriptions
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_usage_tracking_updated_at ON usage_tracking;
+CREATE TRIGGER update_usage_tracking_updated_at
+  BEFORE UPDATE ON usage_tracking
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 `;

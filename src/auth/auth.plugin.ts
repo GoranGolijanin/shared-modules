@@ -25,6 +25,8 @@ export interface AuthPluginOptions {
   bcryptRounds?: number;
   appUrl: string;
   cookieSecret?: string;
+  /** Prefix for auth routes (e.g., '/api' makes routes available at /api/auth/*) */
+  routePrefix?: string;
 }
 
 export async function authPlugin(fastify: FastifyInstance, options: AuthPluginOptions) {
@@ -57,8 +59,17 @@ export async function authPlugin(fastify: FastifyInstance, options: AuthPluginOp
     }
   });
 
-  // Register auth routes
-  registerAuthRoutes(fastify, config);
+  // Register auth routes (with optional prefix)
+  if (options.routePrefix) {
+    await fastify.register(
+      async (instance) => {
+        registerAuthRoutes(instance, config);
+      },
+      { prefix: options.routePrefix }
+    );
+  } else {
+    registerAuthRoutes(fastify, config);
+  }
 }
 
 export default authPlugin;
