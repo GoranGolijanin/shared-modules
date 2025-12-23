@@ -67,7 +67,6 @@ const verifyEmailSchema = {
 const refreshTokenSchema = {
   body: {
     type: 'object',
-    required: ['refreshToken'],
     properties: {
       refreshToken: { type: 'string' },
     },
