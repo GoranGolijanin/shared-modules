@@ -50,7 +50,7 @@ export class SubscriptionService {
    * Get user's current subscription with plan details
    */
   async getUserSubscription(userId: string): Promise<UserSubscriptionWithPlan | null> {
-    const result = await queryOne<UserSubscription & SubscriptionPlan & { plan_name: string }>(
+    const result = await queryOne<UserSubscription & SubscriptionPlan & { plan_name: string; plan_created_at: Date }>(
       `SELECT
         us.*,
         sp.name as plan_name,

@@ -4,15 +4,9 @@ import { UsageService } from '../usage/usage.service.js';
 import { LoggerService } from '../logging/logger.service.js';
 import { PlanLimitErrorCode } from '../types/index.js';
 
-// Extend FastifyRequest to include user from JWT
+// Extend FastifyInstance with plan limit check methods
+// Note: FastifyRequest.user is already declared by @fastify/jwt in auth.plugin.ts
 declare module 'fastify' {
-  interface FastifyRequest {
-    user?: {
-      userId: string;
-      email: string;
-    };
-  }
-
   interface FastifyInstance {
     checkDomainLimit: (currentCount: number) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
     checkTeamLimit: (currentCount: number) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
