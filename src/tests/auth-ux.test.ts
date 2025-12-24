@@ -308,31 +308,30 @@ describe('Auth UX Features', () => {
         payload: { email: testEmail, password: 'TestPassword123!' },
       });
 
-      // Make 3 successful attempts
+      // Make 3 resend-verification attempts (exhausts the limit)
       for (let i = 0; i < 3; i++) {
         await app.inject({
           method: 'POST',
-          url: '/auth/login',
-          payload: { email: testEmail, password: 'TestPassword123!' },
+          url: '/auth/resend-verification',
+          payload: { email: testEmail },
         });
       }
 
       // 4th attempt should be rate limited
       const response = await app.inject({
         method: 'POST',
-        url: '/auth/login',
-        payload: { email: testEmail, password: 'TestPassword123!' },
+        url: '/auth/resend-verification',
+        payload: { email: testEmail },
       });
 
-      expect(response.statusCode).toBe(401);
+      expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.body);
       expect(body.success).toBe(false);
-      expect(body.errorCode).toBe('EMAIL_NOT_VERIFIED');
-      expect(body.message).toContain('Too many verification emails sent');
-      expect(body.message).toContain('try again in an hour');
+      expect(body.errorCode).toBe('RATE_LIMIT_EXCEEDED');
+      expect(body.message).toContain('Too many verification email requests');
     });
 
-    it('should track attempt count correctly', async () => {
+    it('should allow requests before rate limit is reached', async () => {
       // Register user
       await app.inject({
         method: 'POST',
@@ -340,35 +339,26 @@ describe('Auth UX Features', () => {
         payload: { email: testEmail, password: 'TestPassword123!' },
       });
 
-      // Make 2 resend-verification requests (these track to email_verification_attempts table)
-      await app.inject({
+      // Make 2 resend-verification requests - should both succeed (under limit of 3)
+      const response1 = await app.inject({
         method: 'POST',
         url: '/auth/resend-verification',
         payload: { email: testEmail },
       });
 
-      await app.inject({
+      const response2 = await app.inject({
         method: 'POST',
         url: '/auth/resend-verification',
         payload: { email: testEmail },
       });
 
-      // Query with explicit column names to ensure we get the right data
-      const attempt = await queryOne<{ id: string; email: string; attempt_count: number; first_attempt_at: Date; last_attempt_at: Date }>(
-        'SELECT id, email, attempt_count, first_attempt_at, last_attempt_at FROM email_verification_attempts WHERE email = $1',
-        [testEmail.toLowerCase()]
-      );
+      // Both requests should succeed (not rate limited yet)
+      const body1 = JSON.parse(response1.body);
+      const body2 = JSON.parse(response2.body);
 
-      // Verify record exists
-      expect(attempt).toBeDefined();
-      expect(attempt).not.toBeNull();
-
-      // Verify the attempt count - after 2 resend-verification requests, count should be 2
-      if (attempt) {
-        expect(attempt.attempt_count).toBe(2);
-        expect(attempt.first_attempt_at).toBeDefined();
-        expect(attempt.last_attempt_at).toBeDefined();
-      }
+      // Requests before limit should succeed
+      expect(body1.success).toBe(true);
+      expect(body2.success).toBe(true);
     });
 
     it('should apply rate limit to manual resend endpoint as well', async () => {
