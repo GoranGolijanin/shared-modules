@@ -24,11 +24,13 @@ describe('Logger Service', () => {
 
   describe('info()', () => {
     it('should log info message successfully', async () => {
+      const testUserId = '00000000-0000-0000-0000-000000000001';
+
       await logger.info({
         action: 'test_action',
         message: 'Test info message',
         user_email: 'testuser@test.com',
-        user_id: 'test-user-id-123',
+        user_id: testUserId,
       });
 
       const log = await waitForLog(() =>
@@ -43,7 +45,7 @@ describe('Logger Service', () => {
       expect(log?.action).toBe('test_action');
       expect(log?.message).toBe('Test info message');
       expect(log?.user_email).toBe('testuser@test.com');
-      expect(log?.user_id).toBe('test-user-id-123');
+      expect(log?.user_id).toBe(testUserId);
     });
 
     it('should log info with metadata', async () => {
