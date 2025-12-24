@@ -340,7 +340,7 @@ describe('Auth UX Features', () => {
         payload: { email: testEmail, password: 'TestPassword123!' },
       });
 
-      // Make 2 attempts
+      // Make 2 login attempts (each triggers checkRateLimit which tracks attempts)
       await app.inject({
         method: 'POST',
         url: '/auth/login',
@@ -353,15 +353,22 @@ describe('Auth UX Features', () => {
         payload: { email: testEmail, password: 'TestPassword123!' },
       });
 
-      const attempt = await queryOne<EmailVerificationAttempt>(
-        'SELECT * FROM email_verification_attempts WHERE email = $1',
+      // Query with explicit column names to ensure we get the right data
+      const attempt = await queryOne<{ id: string; email: string; attempt_count: number; first_attempt_at: Date; last_attempt_at: Date }>(
+        'SELECT id, email, attempt_count, first_attempt_at, last_attempt_at FROM email_verification_attempts WHERE email = $1',
         [testEmail.toLowerCase()]
       );
 
+      // Verify record exists
       expect(attempt).toBeDefined();
-      expect(attempt?.attempt_count).toBe(2);
-      expect(attempt?.first_attempt_at).toBeDefined();
-      expect(attempt?.last_attempt_at).toBeDefined();
+      expect(attempt).not.toBeNull();
+
+      // Verify the attempt count - after 2 login attempts for unverified user, count should be 2
+      if (attempt) {
+        expect(attempt.attempt_count).toBe(2);
+        expect(attempt.first_attempt_at).toBeDefined();
+        expect(attempt.last_attempt_at).toBeDefined();
+      }
     });
 
     it('should apply rate limit to manual resend endpoint as well', async () => {
