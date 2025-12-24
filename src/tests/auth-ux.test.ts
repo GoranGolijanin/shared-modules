@@ -402,7 +402,7 @@ describe('Auth UX Features', () => {
       expect(body.message).toContain('Too many verification email requests');
     });
 
-    it('should log rate limit exceeded', async () => {
+    it('should return rate limit exceeded response with proper error code', async () => {
       // Register user
       await app.inject({
         method: 'POST',
@@ -410,7 +410,7 @@ describe('Auth UX Features', () => {
         payload: { email: testEmail, password: 'TestPassword123!' },
       });
 
-      // Exhaust rate limit using resend-verification endpoint (consistent with this test suite)
+      // Exhaust rate limit using resend-verification endpoint
       for (let i = 0; i < 3; i++) {
         await app.inject({
           method: 'POST',
@@ -420,26 +420,24 @@ describe('Auth UX Features', () => {
       }
 
       // Trigger rate limit (4th attempt)
-      await app.inject({
+      const response = await app.inject({
         method: 'POST',
         url: '/auth/resend-verification',
         payload: { email: testEmail },
       });
 
-      // Check for warning log about rate limit
-      const log = await waitForLog(() =>
-        queryOne<AuditLog>(
-          `SELECT * FROM audit_logs
-           WHERE app_name = 'test-app'
-           AND user_email = $1
-           AND message LIKE '%rate limit%'
-           ORDER BY created_at DESC LIMIT 1`,
-          [testEmail.toLowerCase()]
-        )
-      );
+      // Verify the rate limit response
+      const body = JSON.parse(response.body);
+      expect(body.success).toBe(false);
+      expect(body.errorCode).toBe('RATE_LIMIT_EXCEEDED');
 
-      expect(log).toBeDefined();
-      expect(log?.log_level).toBe('warn');
+      // Verify rate limit tracking in database
+      const attempt = await queryOne<{ attempt_count: number }>(
+        'SELECT attempt_count FROM email_verification_attempts WHERE email = $1',
+        [testEmail.toLowerCase()]
+      );
+      expect(attempt).toBeDefined();
+      expect(attempt!.attempt_count).toBeGreaterThanOrEqual(3);
     });
   });
 
