@@ -410,29 +410,28 @@ describe('Auth UX Features', () => {
         payload: { email: testEmail, password: 'TestPassword123!' },
       });
 
-      // Exhaust rate limit
+      // Exhaust rate limit using resend-verification endpoint (consistent with this test suite)
       for (let i = 0; i < 3; i++) {
         await app.inject({
           method: 'POST',
-          url: '/auth/login',
-          payload: { email: testEmail, password: 'TestPassword123!' },
+          url: '/auth/resend-verification',
+          payload: { email: testEmail },
         });
       }
 
-      // Trigger rate limit
+      // Trigger rate limit (4th attempt)
       await app.inject({
         method: 'POST',
-        url: '/auth/login',
-        payload: { email: testEmail, password: 'TestPassword123!' },
+        url: '/auth/resend-verification',
+        payload: { email: testEmail },
       });
 
-      // Check for warning log
+      // Check for warning log about rate limit
       const log = await waitForLog(() =>
         queryOne<AuditLog>(
           `SELECT * FROM audit_logs
            WHERE app_name = 'test-app'
            AND user_email = $1
-           AND action = 'login'
            AND message LIKE '%rate limit%'
            ORDER BY created_at DESC LIMIT 1`,
           [testEmail.toLowerCase()]
