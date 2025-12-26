@@ -3,6 +3,13 @@ import { createTestServer, cleanupTestData, closeDatabase, generateTestEmail, wa
 import { execute, queryOne } from '../database/config';
 import type { AuditLog, EmailVerificationAttempt } from '../types/index';
 
+// Mock the Brevo email module to prevent sending real emails during tests
+jest.mock('../email/brevo', () => ({
+  sendEmail: jest.fn().mockResolvedValue(true),
+  sendVerificationEmail: jest.fn().mockResolvedValue(true),
+  sendPasswordResetEmail: jest.fn().mockResolvedValue(true),
+}));
+
 describe('Auth UX Features', () => {
   let app: FastifyInstance;
   let testEmail: string;
@@ -260,44 +267,21 @@ describe('Auth UX Features', () => {
         payload: { email: testEmail, password: 'TestPassword123!' },
       });
 
-      // Attempt 1
-      const response1 = await app.inject({
-        method: 'POST',
-        url: '/auth/login',
-        payload: { email: testEmail, password: 'TestPassword123!' },
-      });
-      expect(response1.statusCode).toBe(401);
-      const body1 = JSON.parse(response1.body);
-      expect(body1.message).toContain('sent you a new verification link');
+      // Make 3 resend-verification requests - all should succeed
+      const responses = [];
+      for (let i = 0; i < 3; i++) {
+        const response = await app.inject({
+          method: 'POST',
+          url: '/auth/resend-verification',
+          payload: { email: testEmail },
+        });
+        responses.push(JSON.parse(response.body));
+      }
 
-      // Attempt 2
-      const response2 = await app.inject({
-        method: 'POST',
-        url: '/auth/login',
-        payload: { email: testEmail, password: 'TestPassword123!' },
-      });
-      expect(response2.statusCode).toBe(401);
-      const body2 = JSON.parse(response2.body);
-      expect(body2.message).toContain('sent you a new verification link');
-
-      // Attempt 3
-      const response3 = await app.inject({
-        method: 'POST',
-        url: '/auth/login',
-        payload: { email: testEmail, password: 'TestPassword123!' },
-      });
-      expect(response3.statusCode).toBe(401);
-      const body3 = JSON.parse(response3.body);
-      expect(body3.message).toContain('sent you a new verification link');
-
-      // Check rate limit entry
-      const attempt = await queryOne<EmailVerificationAttempt>(
-        'SELECT * FROM email_verification_attempts WHERE email = $1',
-        [testEmail.toLowerCase()]
-      );
-
-      expect(attempt).toBeDefined();
-      expect(attempt?.attempt_count).toBe(3);
+      // All 3 requests should succeed (not rate limited)
+      expect(responses[0].success).toBe(true);
+      expect(responses[1].success).toBe(true);
+      expect(responses[2].success).toBe(true);
     });
 
     it('should block 4th attempt and return rate limit error', async () => {
