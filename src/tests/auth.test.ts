@@ -2,6 +2,13 @@ import { FastifyInstance } from 'fastify';
 import { createTestServer, cleanupTestData, closeDatabase, generateTestEmail } from './test-utils';
 import { queryOne, execute } from '../database/config';
 
+// Mock the Brevo email module to prevent sending real emails during tests
+jest.mock('../email/brevo', () => ({
+  sendEmail: jest.fn().mockResolvedValue(true),
+  sendVerificationEmail: jest.fn().mockResolvedValue(true),
+  sendPasswordResetEmail: jest.fn().mockResolvedValue(true),
+}));
+
 describe('Auth Module', () => {
   let app: FastifyInstance;
   let testEmail: string;
