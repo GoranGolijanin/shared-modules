@@ -70,15 +70,28 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   plan_id UUID NOT NULL REFERENCES subscription_plans(id),
-  status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'cancelled', 'expired')),
+  status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'cancelled', 'expired', 'trial')),
   started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   expires_at TIMESTAMP WITH TIME ZONE,
   billing_cycle VARCHAR(10) CHECK (billing_cycle IN ('monthly', 'annual')),
   stripe_subscription_id VARCHAR(255),
+  is_trial BOOLEAN DEFAULT FALSE,
+  trial_ends_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(user_id)
 );
+
+-- Add trial columns if they don't exist (for existing databases)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'user_subscriptions' AND column_name = 'is_trial') THEN
+    ALTER TABLE user_subscriptions ADD COLUMN is_trial BOOLEAN DEFAULT FALSE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'user_subscriptions' AND column_name = 'trial_ends_at') THEN
+    ALTER TABLE user_subscriptions ADD COLUMN trial_ends_at TIMESTAMP WITH TIME ZONE;
+  END IF;
+END $$;
 
 -- Usage tracking table (monthly usage per user)
 CREATE TABLE IF NOT EXISTS usage_tracking (

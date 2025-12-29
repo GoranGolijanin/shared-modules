@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { query, queryOne, execute } from '../database/config.js';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../email/brevo.js';
 import { LoggerService } from '../logging/logger.service.js';
+import { SubscriptionService } from '../subscription/subscription.service.js';
 import type {
   User,
   RefreshToken,
@@ -19,6 +20,7 @@ export class AuthService {
   private signJwt: (payload: { userId: string; email: string }, options?: { expiresIn?: string }) => string;
   private verifyJwt: (token: string) => JWTPayload;
   private logger: LoggerService;
+  private subscriptionService: SubscriptionService;
 
   constructor(
     config: AuthConfig,
@@ -30,6 +32,7 @@ export class AuthService {
     this.signJwt = signJwt;
     this.verifyJwt = verifyJwt;
     this.logger = logger;
+    this.subscriptionService = new SubscriptionService(config.appName, logger);
   }
 
   private generateToken(): string {
@@ -224,6 +227,26 @@ export class AuthService {
        WHERE id = $1`,
       [user.id]
     );
+
+    // Assign 14-day trial with Professional features to the newly verified user
+    try {
+      await this.subscriptionService.assignTrialPlan(user.id);
+      await this.logger.info({
+        action: 'assign_trial',
+        message: `14-day trial assigned to ${user.email}`,
+        user_email: user.email,
+        user_id: user.id,
+      });
+    } catch (trialError) {
+      // Log but don't fail the verification if trial assignment fails
+      await this.logger.error({
+        action: 'assign_trial',
+        message: `Failed to assign trial to ${user.email}`,
+        user_email: user.email,
+        user_id: user.id,
+        error_stack: trialError instanceof Error ? trialError.stack : undefined,
+      });
+    }
 
     await this.logger.info({
       action: 'verify_email',
