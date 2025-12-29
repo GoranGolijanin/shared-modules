@@ -402,6 +402,202 @@ describe('Auth Module', () => {
 
       expect(response.statusCode).toBe(400);
     });
+
+    it('should complete full password reset flow', async () => {
+      // Register and verify user
+      await app.inject({
+        method: 'POST',
+        url: '/auth/register',
+        payload: { email: testEmail, password: 'OldPassword123!' },
+      });
+
+      await execute('UPDATE users SET email_verified = true WHERE email = $1', [testEmail.toLowerCase()]);
+
+      // Request password reset
+      await app.inject({
+        method: 'POST',
+        url: '/auth/forgot-password',
+        payload: { email: testEmail },
+      });
+
+      // Get the reset token from database (in real app, user gets this via email)
+      const user = await queryOne<{ password_reset_token: string }>(
+        'SELECT password_reset_token FROM users WHERE email = $1',
+        [testEmail.toLowerCase()]
+      );
+
+      expect(user).toBeDefined();
+      expect(user?.password_reset_token).toBeDefined();
+
+      // We need the unhashed token, but it's hashed in DB
+      // For testing, we'll set a known token directly
+      const testResetToken = 'test-reset-token-12345';
+      const crypto = require('crypto');
+      const hashedToken = crypto.createHash('sha256').update(testResetToken).digest('hex');
+      const resetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
+
+      await execute(
+        'UPDATE users SET password_reset_token = $1, password_reset_expires = $2 WHERE email = $3',
+        [hashedToken, resetExpires, testEmail.toLowerCase()]
+      );
+
+      // Reset password with the token
+      const resetResponse = await app.inject({
+        method: 'POST',
+        url: '/auth/reset-password',
+        payload: { token: testResetToken, password: 'NewPassword456!' },
+      });
+
+      expect(resetResponse.statusCode).toBe(200);
+      const resetBody = JSON.parse(resetResponse.body);
+      expect(resetBody.success).toBe(true);
+
+      // Verify login works with new password
+      const loginResponse = await app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: testEmail, password: 'NewPassword456!' },
+      });
+
+      expect(loginResponse.statusCode).toBe(200);
+      const loginBody = JSON.parse(loginResponse.body);
+      expect(loginBody.success).toBe(true);
+
+      // Verify old password no longer works
+      const oldLoginResponse = await app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: testEmail, password: 'OldPassword123!' },
+      });
+
+      expect(oldLoginResponse.statusCode).toBe(401);
+    });
+
+    it('should reject expired reset token', async () => {
+      // Register user
+      await app.inject({
+        method: 'POST',
+        url: '/auth/register',
+        payload: { email: testEmail, password: 'TestPassword123!' },
+      });
+
+      // Set an expired reset token directly in DB
+      const testResetToken = 'expired-reset-token-12345';
+      const crypto = require('crypto');
+      const hashedToken = crypto.createHash('sha256').update(testResetToken).digest('hex');
+      const expiredTime = new Date(Date.now() - 60 * 60 * 1000); // 1 hour ago (expired)
+
+      await execute(
+        'UPDATE users SET password_reset_token = $1, password_reset_expires = $2 WHERE email = $3',
+        [hashedToken, expiredTime, testEmail.toLowerCase()]
+      );
+
+      // Try to reset with expired token
+      const response = await app.inject({
+        method: 'POST',
+        url: '/auth/reset-password',
+        payload: { token: testResetToken, password: 'NewPassword123!' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      const body = JSON.parse(response.body);
+      expect(body.success).toBe(false);
+      expect(body.errorCode).toBe('TOKEN_EXPIRED');
+    });
+
+    it('should invalidate token after use (prevent reuse)', async () => {
+      // Register and verify user
+      await app.inject({
+        method: 'POST',
+        url: '/auth/register',
+        payload: { email: testEmail, password: 'TestPassword123!' },
+      });
+
+      await execute('UPDATE users SET email_verified = true WHERE email = $1', [testEmail.toLowerCase()]);
+
+      // Set a valid reset token
+      const testResetToken = 'one-time-reset-token';
+      const crypto = require('crypto');
+      const hashedToken = crypto.createHash('sha256').update(testResetToken).digest('hex');
+      const resetExpires = new Date(Date.now() + 60 * 60 * 1000);
+
+      await execute(
+        'UPDATE users SET password_reset_token = $1, password_reset_expires = $2 WHERE email = $3',
+        [hashedToken, resetExpires, testEmail.toLowerCase()]
+      );
+
+      // First reset should succeed
+      const firstReset = await app.inject({
+        method: 'POST',
+        url: '/auth/reset-password',
+        payload: { token: testResetToken, password: 'NewPassword123!' },
+      });
+
+      expect(firstReset.statusCode).toBe(200);
+
+      // Second reset with same token should fail
+      const secondReset = await app.inject({
+        method: 'POST',
+        url: '/auth/reset-password',
+        payload: { token: testResetToken, password: 'AnotherPassword456!' },
+      });
+
+      expect(secondReset.statusCode).toBe(400);
+      const body = JSON.parse(secondReset.body);
+      expect(body.success).toBe(false);
+      expect(body.errorCode).toBe('INVALID_TOKEN');
+    });
+
+    it('should revoke all sessions after password reset', async () => {
+      // Register, verify and login user
+      await app.inject({
+        method: 'POST',
+        url: '/auth/register',
+        payload: { email: testEmail, password: 'TestPassword123!' },
+      });
+
+      await execute('UPDATE users SET email_verified = true WHERE email = $1', [testEmail.toLowerCase()]);
+
+      const loginResponse = await app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: testEmail, password: 'TestPassword123!' },
+      });
+
+      const loginBody = JSON.parse(loginResponse.body);
+      const oldAccessToken = loginBody.accessToken;
+
+      // Set a valid reset token
+      const testResetToken = 'session-revoke-test-token';
+      const crypto = require('crypto');
+      const hashedToken = crypto.createHash('sha256').update(testResetToken).digest('hex');
+      const resetExpires = new Date(Date.now() + 60 * 60 * 1000);
+
+      await execute(
+        'UPDATE users SET password_reset_token = $1, password_reset_expires = $2 WHERE email = $3',
+        [hashedToken, resetExpires, testEmail.toLowerCase()]
+      );
+
+      // Reset password
+      await app.inject({
+        method: 'POST',
+        url: '/auth/reset-password',
+        payload: { token: testResetToken, password: 'NewPassword123!' },
+      });
+
+      // Verify old refresh tokens are revoked (check database)
+      const user = await queryOne<{ id: string }>(
+        'SELECT id FROM users WHERE email = $1',
+        [testEmail.toLowerCase()]
+      );
+
+      const activeTokens = await queryOne<{ count: string }>(
+        'SELECT COUNT(*) as count FROM refresh_tokens WHERE user_id = $1 AND revoked = false',
+        [user?.id]
+      );
+
+      expect(parseInt(activeTokens?.count || '0')).toBe(0);
+    });
   });
 
   describe('POST /auth/logout', () => {

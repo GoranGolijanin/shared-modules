@@ -134,6 +134,7 @@ export enum SubscriptionStatus {
   ACTIVE = 'active',
   CANCELLED = 'cancelled',
   EXPIRED = 'expired',
+  TRIAL = 'trial',
 }
 
 export enum BillingCycle {
@@ -177,8 +178,17 @@ export interface UserSubscription {
   expires_at: Date | null;
   billing_cycle: BillingCycle | null;
   stripe_subscription_id: string | null;
+  is_trial: boolean;
+  trial_ends_at: Date | null;
   created_at: Date;
   updated_at: Date;
+}
+
+export interface TrialInfo {
+  isOnTrial: boolean;
+  trialEndsAt: Date | null;
+  daysRemaining: number;
+  isExpired: boolean;
 }
 
 export interface UserSubscriptionWithPlan extends UserSubscription {

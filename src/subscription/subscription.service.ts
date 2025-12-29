@@ -8,7 +8,13 @@ import type {
   UsageTracking,
   TeamMember,
   SubscriptionStatus,
+  TrialInfo,
 } from '../types/index.js';
+
+// Trial configuration
+const TRIAL_DURATION_DAYS = 14;
+const TRIAL_MAX_DOMAINS = 10;
+const TRIAL_MAX_SMS = 10;
 
 export class SubscriptionService {
   private logger: LoggerService;
@@ -64,7 +70,7 @@ export class SubscriptionService {
         sp.created_at as plan_created_at
       FROM user_subscriptions us
       JOIN subscription_plans sp ON us.plan_id = sp.id
-      WHERE us.user_id = $1 AND us.status = 'active'`,
+      WHERE us.user_id = $1 AND us.status IN ('active', 'trial')`,
       [userId]
     );
 
@@ -79,6 +85,8 @@ export class SubscriptionService {
       expires_at: result.expires_at,
       billing_cycle: result.billing_cycle,
       stripe_subscription_id: result.stripe_subscription_id,
+      is_trial: result.is_trial || false,
+      trial_ends_at: result.trial_ends_at,
       created_at: result.created_at,
       updated_at: result.updated_at,
       plan: {
@@ -285,7 +293,7 @@ export class SubscriptionService {
    * Check if user can add more domains
    */
   async canAddDomain(userId: string, currentDomainCount: number): Promise<boolean> {
-    const plan = await this.getPlanLimits(userId);
+    const plan = await this.getPlanLimitsWithTrialOverrides(userId);
 
     // Enterprise is unlimited
     if (plan.name.toLowerCase() === 'enterprise') {
@@ -299,7 +307,7 @@ export class SubscriptionService {
    * Check if user can add more team members
    */
   async canAddTeamMember(userId: string, currentTeamCount: number): Promise<boolean> {
-    const plan = await this.getPlanLimits(userId);
+    const plan = await this.getPlanLimitsWithTrialOverrides(userId);
 
     if (plan.name.toLowerCase() === 'enterprise') {
       return true;
@@ -312,7 +320,7 @@ export class SubscriptionService {
    * Check if user can send SMS alerts
    */
   async canSendSms(userId: string): Promise<boolean> {
-    const plan = await this.getPlanLimits(userId);
+    const plan = await this.getPlanLimitsWithTrialOverrides(userId);
 
     // Enterprise can always send
     if (plan.name.toLowerCase() === 'enterprise') {
@@ -339,7 +347,7 @@ export class SubscriptionService {
    * Check if user can make API requests
    */
   async canMakeApiRequest(userId: string): Promise<boolean> {
-    const plan = await this.getPlanLimits(userId);
+    const plan = await this.getPlanLimitsWithTrialOverrides(userId);
 
     // No limit or enterprise
     if (plan.api_requests_per_month === null || plan.name.toLowerCase() === 'enterprise') {
@@ -360,7 +368,7 @@ export class SubscriptionService {
    * Check if user has access to Slack alerts feature
    */
   async canUseSlackAlerts(userId: string): Promise<boolean> {
-    const plan = await this.getPlanLimits(userId);
+    const plan = await this.getPlanLimitsWithTrialOverrides(userId);
     return plan.slack_alerts || plan.name.toLowerCase() === 'enterprise';
   }
 
@@ -368,8 +376,164 @@ export class SubscriptionService {
    * Get the check interval in hours for a user's plan
    */
   async getCheckInterval(userId: string): Promise<number> {
-    const plan = await this.getPlanLimits(userId);
+    const plan = await this.getPlanLimitsWithTrialOverrides(userId);
     return plan.check_interval_hours;
+  }
+
+  // ============================================
+  // Trial Management Methods
+  // ============================================
+
+  /**
+   * Assign a 14-day trial with Professional features to a new user
+   */
+  async assignTrialPlan(userId: string): Promise<UserSubscription | null> {
+    const professionalPlan = await this.getPlanByName('professional');
+
+    if (!professionalPlan) {
+      await this.logger.error({
+        action: 'assign_trial_plan',
+        message: 'Professional plan not found in database',
+        user_id: userId,
+      });
+      // Fallback to starter if professional not found
+      return this.assignDefaultPlan(userId);
+    }
+
+    const trialEndsAt = new Date();
+    trialEndsAt.setDate(trialEndsAt.getDate() + TRIAL_DURATION_DAYS);
+
+    const subscription = await queryOne<UserSubscription>(
+      `INSERT INTO user_subscriptions (user_id, plan_id, status, started_at, is_trial, trial_ends_at)
+       VALUES ($1, $2, 'trial', CURRENT_TIMESTAMP, true, $3)
+       ON CONFLICT (user_id) DO UPDATE SET
+         plan_id = EXCLUDED.plan_id,
+         status = 'trial',
+         started_at = CURRENT_TIMESTAMP,
+         is_trial = true,
+         trial_ends_at = EXCLUDED.trial_ends_at,
+         updated_at = CURRENT_TIMESTAMP
+       RETURNING *`,
+      [userId, professionalPlan.id, trialEndsAt]
+    );
+
+    await this.logger.info({
+      action: 'assign_trial_plan',
+      message: `Assigned 14-day trial to user`,
+      user_id: userId,
+      metadata: { plan_id: professionalPlan.id, trial_ends_at: trialEndsAt },
+    });
+
+    return subscription;
+  }
+
+  /**
+   * Get trial information for a user
+   */
+  async getTrialInfo(userId: string): Promise<TrialInfo> {
+    const subscription = await this.getUserSubscription(userId);
+
+    if (!subscription || !subscription.is_trial || !subscription.trial_ends_at) {
+      return {
+        isOnTrial: false,
+        trialEndsAt: null,
+        daysRemaining: 0,
+        isExpired: false,
+      };
+    }
+
+    const now = new Date();
+    const trialEndsAt = new Date(subscription.trial_ends_at);
+    const isExpired = now > trialEndsAt;
+    const daysRemaining = isExpired
+      ? 0
+      : Math.ceil((trialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+    return {
+      isOnTrial: true,
+      trialEndsAt,
+      daysRemaining,
+      isExpired,
+    };
+  }
+
+  /**
+   * Check if a trial is expired and handle downgrade to Starter
+   * Returns true if the trial was expired and downgraded
+   */
+  async checkAndHandleTrialExpiration(userId: string): Promise<boolean> {
+    const trialInfo = await this.getTrialInfo(userId);
+
+    if (!trialInfo.isOnTrial || !trialInfo.isExpired) {
+      return false;
+    }
+
+    // Downgrade to starter plan
+    const starterPlan = await this.getPlanByName('starter');
+    if (!starterPlan) {
+      await this.logger.error({
+        action: 'trial_expiration',
+        message: 'Cannot downgrade - Starter plan not found',
+        user_id: userId,
+      });
+      return false;
+    }
+
+    await execute(
+      `UPDATE user_subscriptions
+       SET plan_id = $1, status = 'active', is_trial = false, trial_ends_at = NULL, updated_at = CURRENT_TIMESTAMP
+       WHERE user_id = $2`,
+      [starterPlan.id, userId]
+    );
+
+    await this.logger.info({
+      action: 'trial_expired',
+      message: 'Trial expired - downgraded to Starter plan',
+      user_id: userId,
+      metadata: { new_plan_id: starterPlan.id },
+    });
+
+    return true;
+  }
+
+  /**
+   * Get plan limits with trial-specific overrides
+   * Trial users get Professional features but with reduced limits (10 domains, 10 SMS)
+   */
+  async getPlanLimitsWithTrialOverrides(userId: string): Promise<SubscriptionPlan & { isTrialLimited: boolean }> {
+    // First check and handle any expired trials
+    await this.checkAndHandleTrialExpiration(userId);
+
+    const subscription = await this.getUserSubscription(userId);
+    const trialInfo = await this.getTrialInfo(userId);
+
+    let plan = subscription?.plan || await this.getPlanByName('starter') || {
+      id: 'default',
+      name: 'starter',
+      max_domains: 10,
+      max_team_members: 1,
+      check_interval_hours: 12,
+      api_requests_per_month: null,
+      sms_alerts_per_month: 0,
+      email_alerts: true,
+      slack_alerts: false,
+      created_at: new Date(),
+    };
+
+    // Apply trial-specific limits
+    if (trialInfo.isOnTrial && !trialInfo.isExpired) {
+      return {
+        ...plan,
+        max_domains: TRIAL_MAX_DOMAINS,
+        sms_alerts_per_month: TRIAL_MAX_SMS,
+        isTrialLimited: true,
+      };
+    }
+
+    return {
+      ...plan,
+      isTrialLimited: false,
+    };
   }
 
   private getCurrentMonthYear(): string {

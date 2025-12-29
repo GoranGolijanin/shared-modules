@@ -20,6 +20,7 @@ export async function createTestServer(): Promise<FastifyInstance> {
 
 export async function cleanupTestData(): Promise<void> {
   // Delete test data (emails ending with @test.com or test-app data)
+  await execute("DELETE FROM user_subscriptions WHERE user_id IN (SELECT id FROM users WHERE email LIKE '%@test.com')");
   await execute("DELETE FROM refresh_tokens WHERE user_id IN (SELECT id FROM users WHERE email LIKE '%@test.com')");
   await execute("DELETE FROM email_verification_attempts WHERE email LIKE '%@test.com'");
   await execute("DELETE FROM audit_logs WHERE app_name = 'test-app' OR user_email LIKE '%@test.com'");
