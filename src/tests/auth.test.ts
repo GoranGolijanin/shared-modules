@@ -189,8 +189,8 @@ jest.mock('../database/config', () => ({
         // Reset password
         const userId = String(params?.[1]);
         const user = mockUsers.get(userId);
-        if (user) {
-          user.password_hash = params[0];
+        if (user && params) {
+          user.password_hash = params[0] as string;
           user.password_reset_token = null;
           user.password_reset_expires = null;
           return 1;

@@ -6,7 +6,13 @@ export type { AuthPluginOptions } from './auth/index.js';
 export { pool, query, queryOne, execute } from './database/config.js';
 
 // Email exports
-export { sendEmail, sendVerificationEmail, sendPasswordResetEmail } from './email/brevo.js';
+export {
+  sendEmail,
+  sendVerificationEmail,
+  sendPasswordResetEmail,
+  sendSSLExpiryAlert,
+  sendDomainExpiryAlert,
+} from './email/brevo.js';
 export type { EmailOptions } from './email/brevo.js';
 
 // Logging exports
