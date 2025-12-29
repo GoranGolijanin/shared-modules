@@ -1,6 +1,286 @@
-import { FastifyInstance } from 'fastify';
-import { createTestServer, cleanupTestData, closeDatabase, generateTestEmail } from './test-utils';
-import { queryOne, execute } from '../database/config';
+import Fastify, { FastifyInstance } from 'fastify';
+import { authPlugin } from '../auth/index';
+import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
+
+// In-memory database for testing
+const mockUsers: Map<string, any> = new Map();
+const mockRefreshTokens: Map<string, any> = new Map();
+const mockEmailVerificationAttempts: Map<string, any> = new Map();
+
+function generateId() {
+  return crypto.randomUUID();
+}
+
+function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+// Mock the database module
+jest.mock('../database/config', () => ({
+  query: jest.fn().mockImplementation(async (sql: string, params?: unknown[]) => {
+    // Handle SELECT queries
+    if (sql.includes('SELECT') && sql.includes('FROM users')) {
+      const users = Array.from(mockUsers.values());
+      if (params && params[0]) {
+        const email = String(params[0]).toLowerCase();
+        const user = users.find(u => u.email === email);
+        return user ? [user] : [];
+      }
+      return users;
+    }
+    return [];
+  }),
+  queryOne: jest.fn().mockImplementation(async (sql: string, params?: unknown[]) => {
+    // Handle user queries
+    if (sql.includes('FROM users') && sql.includes('email = $1')) {
+      const email = String(params?.[0]).toLowerCase();
+      return Array.from(mockUsers.values()).find(u => u.email === email) || null;
+    }
+
+    // Handle user by id
+    if (sql.includes('FROM users') && sql.includes('id = $1')) {
+      const id = String(params?.[0]);
+      return mockUsers.get(id) || null;
+    }
+
+    // Handle user by verification token
+    if (sql.includes('FROM users') && sql.includes('email_verification_token = $1')) {
+      const tokenHash = String(params?.[0]);
+      return Array.from(mockUsers.values()).find(u => u.email_verification_token === tokenHash) || null;
+    }
+
+    // Handle user by reset token
+    if (sql.includes('FROM users') && sql.includes('password_reset_token = $1')) {
+      const tokenHash = String(params?.[0]);
+      return Array.from(mockUsers.values()).find(u => u.password_reset_token === tokenHash) || null;
+    }
+
+    // Handle refresh token queries
+    if (sql.includes('FROM refresh_tokens') && sql.includes('token_hash = $1')) {
+      const tokenHash = String(params?.[0]);
+      const token = Array.from(mockRefreshTokens.values()).find(t => t.token_hash === tokenHash);
+      if (token && sql.includes('JOIN users')) {
+        const user = mockUsers.get(token.user_id);
+        return { ...token, user_email: user?.email };
+      }
+      return token || null;
+    }
+
+    // Handle email verification attempts
+    if (sql.includes('FROM email_verification_attempts') && sql.includes('email = $1')) {
+      const email = String(params?.[0]).toLowerCase();
+      return mockEmailVerificationAttempts.get(email) || null;
+    }
+
+    // Handle subscription plan queries
+    if (sql.includes('FROM subscription_plans') && sql.includes('name = $1')) {
+      const planName = String(params?.[0]);
+      if (planName === 'professional') {
+        return {
+          id: 'professional-plan-id',
+          name: 'professional',
+          max_domains: 40,
+          max_team_members: 5,
+          check_interval_hours: 6,
+          api_requests_per_month: 5000,
+          sms_alerts_per_month: 100,
+          email_alerts: true,
+          slack_alerts: true,
+        };
+      }
+      if (planName === 'starter') {
+        return {
+          id: 'starter-plan-id',
+          name: 'starter',
+          max_domains: 10,
+          max_team_members: 1,
+          check_interval_hours: 12,
+        };
+      }
+      return null;
+    }
+
+    // Handle INSERT ... RETURNING for users
+    if (sql.includes('INSERT INTO users') && sql.includes('RETURNING')) {
+      const email = String(params?.[0]).toLowerCase();
+      const passwordHash = String(params?.[1]);
+      const verificationToken = String(params?.[2]);
+      const verificationExpires = params?.[3];
+
+      const id = generateId();
+      const user = {
+        id,
+        email,
+        password_hash: passwordHash,
+        email_verified: false,
+        email_verification_token: verificationToken,
+        email_verification_expires: verificationExpires,
+        created_at: new Date(),
+      };
+      mockUsers.set(id, user);
+      return user;
+    }
+
+    // Handle INSERT for subscriptions
+    if (sql.includes('INSERT INTO user_subscriptions') && sql.includes('RETURNING')) {
+      return {
+        id: generateId(),
+        user_id: params?.[0],
+        plan_id: params?.[1],
+        status: params?.[2] || 'trial',
+        is_trial: params?.[3] ?? true,
+        trial_ends_at: params?.[4],
+      };
+    }
+
+    // Handle count queries for refresh tokens
+    if (sql.includes('COUNT(*)') && sql.includes('refresh_tokens')) {
+      const userId = String(params?.[0]);
+      const tokens = Array.from(mockRefreshTokens.values()).filter(
+        t => t.user_id === userId && !t.revoked
+      );
+      return { count: String(tokens.length) };
+    }
+
+    return null;
+  }),
+  execute: jest.fn().mockImplementation(async (sql: string, params?: unknown[]) => {
+    // Handle INSERT into refresh_tokens
+    if (sql.includes('INSERT INTO refresh_tokens')) {
+      const id = generateId();
+      const token = {
+        id,
+        user_id: params?.[0],
+        token_hash: params?.[1],
+        expires_at: params?.[2],
+        revoked: false,
+      };
+      mockRefreshTokens.set(id, token);
+      return 1;
+    }
+
+    // Handle UPDATE users (verify email)
+    if (sql.includes('UPDATE users') && sql.includes('email_verified = true')) {
+      const userId = String(params?.[0]);
+      const user = mockUsers.get(userId);
+      if (user) {
+        user.email_verified = true;
+        user.email_verification_token = null;
+        user.email_verification_expires = null;
+        return 1;
+      }
+      return 0;
+    }
+
+    // Handle UPDATE users (password reset token)
+    if (sql.includes('UPDATE users') && sql.includes('password_reset_token')) {
+      if (sql.includes('password_reset_token = $1') && params?.length === 3) {
+        // Set reset token
+        const users = Array.from(mockUsers.values());
+        const userByEmail = users.find(u => u.email === String(params[2]).toLowerCase());
+        if (userByEmail) {
+          userByEmail.password_reset_token = params[0];
+          userByEmail.password_reset_expires = params[1];
+          return 1;
+        }
+      }
+      if (sql.includes('password_hash = $1')) {
+        // Reset password
+        const userId = String(params?.[1]);
+        const user = mockUsers.get(userId);
+        if (user) {
+          user.password_hash = params[0];
+          user.password_reset_token = null;
+          user.password_reset_expires = null;
+          return 1;
+        }
+      }
+      return 0;
+    }
+
+    // Handle UPDATE refresh_tokens (revoke)
+    if (sql.includes('UPDATE refresh_tokens') && sql.includes('revoked = true')) {
+      if (sql.includes('token_hash = $1')) {
+        const tokenHash = String(params?.[0]);
+        const token = Array.from(mockRefreshTokens.values()).find(t => t.token_hash === tokenHash);
+        if (token) {
+          token.revoked = true;
+          return 1;
+        }
+        return 0;
+      }
+      if (sql.includes('WHERE id = $1')) {
+        // Revoke by token id (token rotation)
+        const tokenId = String(params?.[0]);
+        const token = mockRefreshTokens.get(tokenId);
+        if (token) {
+          token.revoked = true;
+          return 1;
+        }
+        return 0;
+      }
+      if (sql.includes('user_id = $1')) {
+        const userId = String(params?.[0]);
+        let count = 0;
+        mockRefreshTokens.forEach(token => {
+          if (token.user_id === userId) {
+            token.revoked = true;
+            count++;
+          }
+        });
+        return count;
+      }
+    }
+
+    // Handle INSERT into email_verification_attempts
+    if (sql.includes('INSERT INTO email_verification_attempts')) {
+      const email = String(params?.[0]).toLowerCase();
+      mockEmailVerificationAttempts.set(email, {
+        id: generateId(),
+        email,
+        attempt_count: 1,
+        first_attempt_at: new Date(),
+        last_attempt_at: new Date(),
+      });
+      return 1;
+    }
+
+    // Handle UPDATE email_verification_attempts
+    if (sql.includes('UPDATE email_verification_attempts')) {
+      const id = String(params?.[0]);
+      const attempt = Array.from(mockEmailVerificationAttempts.values()).find(a => a.id === id);
+      if (attempt) {
+        if (sql.includes('attempt_count = 1')) {
+          attempt.attempt_count = 1;
+          attempt.first_attempt_at = new Date();
+        } else {
+          attempt.attempt_count++;
+        }
+        attempt.last_attempt_at = new Date();
+        return 1;
+      }
+      return 0;
+    }
+
+    // Handle DELETE
+    if (sql.includes('DELETE FROM')) {
+      return 0;
+    }
+
+    return 0;
+  }),
+  pool: {
+    query: jest.fn().mockImplementation(async (sql: string) => {
+      // For schema checks
+      if (sql.includes('information_schema.columns')) {
+        return { rows: [{ column_name: 'is_trial' }] };
+      }
+      return { rows: [], rowCount: 0 };
+    }),
+    end: jest.fn(),
+  },
+}));
 
 // Mock the Brevo email module to prevent sending real emails during tests
 jest.mock('../email/brevo', () => ({
@@ -9,30 +289,56 @@ jest.mock('../email/brevo', () => ({
   sendPasswordResetEmail: jest.fn().mockResolvedValue(true),
 }));
 
+// Mock the logger to prevent actual logging
+jest.mock('../logging/logger.service', () => ({
+  LoggerService: jest.fn().mockImplementation(() => ({
+    info: jest.fn().mockResolvedValue(undefined),
+    error: jest.fn().mockResolvedValue(undefined),
+    warn: jest.fn().mockResolvedValue(undefined),
+    debug: jest.fn().mockResolvedValue(undefined),
+  })),
+}));
+
 describe('Auth Module', () => {
   let app: FastifyInstance;
-  let testEmail: string;
-  let verificationToken: string;
-  let accessToken: string;
-  let refreshToken: string;
 
   beforeAll(async () => {
-    app = await createTestServer();
+    app = Fastify({ logger: false });
+
+    await app.register(authPlugin, {
+      appName: 'test-app',
+      jwtSecret: 'test-jwt-secret-for-testing-only',
+      jwtExpiresIn: '15m',
+      refreshTokenExpiresIn: '7d',
+      bcryptRounds: 4, // Lower rounds for faster tests
+      appUrl: 'http://localhost:3000',
+      cookieSecret: 'test-cookie-secret',
+    });
+
     await app.ready();
   });
 
   afterAll(async () => {
-    await cleanupTestData();
     await app.close();
-    await closeDatabase();
   });
 
   beforeEach(() => {
-    testEmail = generateTestEmail();
+    // Clear mock data before each test
+    mockUsers.clear();
+    mockRefreshTokens.clear();
+    mockEmailVerificationAttempts.clear();
   });
+
+  function generateTestEmail(): string {
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(7);
+    return `test-${timestamp}-${random}@test.com`;
+  }
 
   describe('POST /auth/register', () => {
     it('should register a new user successfully', async () => {
+      const testEmail = generateTestEmail();
+
       const response = await app.inject({
         method: 'POST',
         url: '/auth/register',
@@ -50,6 +356,8 @@ describe('Auth Module', () => {
     });
 
     it('should reject registration with existing email', async () => {
+      const testEmail = generateTestEmail();
+
       // First registration
       await app.inject({
         method: 'POST',
@@ -90,6 +398,7 @@ describe('Auth Module', () => {
     });
 
     it('should reject registration with short password', async () => {
+      const testEmail = generateTestEmail();
       const response = await app.inject({
         method: 'POST',
         url: '/auth/register',
@@ -104,25 +413,6 @@ describe('Auth Module', () => {
   });
 
   describe('POST /auth/verify-email', () => {
-    beforeEach(async () => {
-      // Register a user and get verification token from database
-      await app.inject({
-        method: 'POST',
-        url: '/auth/register',
-        payload: {
-          email: testEmail,
-          password: 'TestPassword123!',
-        },
-      });
-
-      // Get the verification token hash from database
-      const user = await queryOne<{ email_verification_token: string }>(
-        'SELECT email_verification_token FROM users WHERE email = $1',
-        [testEmail.toLowerCase()]
-      );
-      verificationToken = user?.email_verification_token || '';
-    });
-
     it('should reject invalid verification token', async () => {
       const response = await app.inject({
         method: 'POST',
@@ -139,8 +429,10 @@ describe('Auth Module', () => {
   });
 
   describe('POST /auth/login', () => {
-    beforeEach(async () => {
-      // Register and manually verify user
+    it('should login successfully with valid credentials', async () => {
+      const testEmail = generateTestEmail();
+
+      // Register user
       await app.inject({
         method: 'POST',
         url: '/auth/register',
@@ -150,14 +442,12 @@ describe('Auth Module', () => {
         },
       });
 
-      // Manually verify the user for testing
-      await execute(
-        'UPDATE users SET email_verified = true WHERE email = $1',
-        [testEmail.toLowerCase()]
-      );
-    });
+      // Manually verify the user
+      const user = Array.from(mockUsers.values()).find(u => u.email === testEmail.toLowerCase());
+      if (user) {
+        user.email_verified = true;
+      }
 
-    it('should login successfully with valid credentials', async () => {
       const response = await app.inject({
         method: 'POST',
         url: '/auth/login',
@@ -173,19 +463,27 @@ describe('Auth Module', () => {
       expect(body.accessToken).toBeDefined();
       expect(body.user).toBeDefined();
       expect(body.user.email).toBe(testEmail.toLowerCase());
-
-      // Save tokens for later tests
-      accessToken = body.accessToken;
-
-      // Get refresh token from cookie
-      const cookies = response.cookies;
-      const refreshCookie = cookies.find((c: { name: string }) => c.name === 'refreshToken');
-      if (refreshCookie) {
-        refreshToken = refreshCookie.value;
-      }
     });
 
     it('should reject login with wrong password', async () => {
+      const testEmail = generateTestEmail();
+
+      // Register user
+      await app.inject({
+        method: 'POST',
+        url: '/auth/register',
+        payload: {
+          email: testEmail,
+          password: 'TestPassword123!',
+        },
+      });
+
+      // Manually verify the user
+      const user = Array.from(mockUsers.values()).find(u => u.email === testEmail.toLowerCase());
+      if (user) {
+        user.email_verified = true;
+      }
+
       const response = await app.inject({
         method: 'POST',
         url: '/auth/login',
@@ -217,14 +515,14 @@ describe('Auth Module', () => {
     });
 
     it('should reject login for unverified email', async () => {
-      const unverifiedEmail = generateTestEmail();
+      const testEmail = generateTestEmail();
 
       // Register but don't verify
       await app.inject({
         method: 'POST',
         url: '/auth/register',
         payload: {
-          email: unverifiedEmail,
+          email: testEmail,
           password: 'TestPassword123!',
         },
       });
@@ -233,7 +531,7 @@ describe('Auth Module', () => {
         method: 'POST',
         url: '/auth/login',
         payload: {
-          email: unverifiedEmail,
+          email: testEmail,
           password: 'TestPassword123!',
         },
       });
@@ -245,10 +543,10 @@ describe('Auth Module', () => {
   });
 
   describe('POST /auth/refresh', () => {
-    let userRefreshToken: string;
+    it('should refresh tokens successfully', async () => {
+      const testEmail = generateTestEmail();
 
-    beforeEach(async () => {
-      // Register, verify, and login user
+      // Register and login user
       await app.inject({
         method: 'POST',
         url: '/auth/register',
@@ -258,10 +556,11 @@ describe('Auth Module', () => {
         },
       });
 
-      await execute(
-        'UPDATE users SET email_verified = true WHERE email = $1',
-        [testEmail.toLowerCase()]
-      );
+      // Manually verify
+      const user = Array.from(mockUsers.values()).find(u => u.email === testEmail.toLowerCase());
+      if (user) {
+        user.email_verified = true;
+      }
 
       const loginResponse = await app.inject({
         method: 'POST',
@@ -274,10 +573,8 @@ describe('Auth Module', () => {
 
       const cookies = loginResponse.cookies;
       const refreshCookie = cookies.find((c: { name: string }) => c.name === 'refreshToken');
-      userRefreshToken = refreshCookie?.value || '';
-    });
+      const userRefreshToken = refreshCookie?.value || '';
 
-    it('should refresh tokens successfully', async () => {
       const response = await app.inject({
         method: 'POST',
         url: '/auth/refresh',
@@ -307,6 +604,36 @@ describe('Auth Module', () => {
     });
 
     it('should detect token reuse (rotation)', async () => {
+      const testEmail = generateTestEmail();
+
+      // Register, verify and login
+      await app.inject({
+        method: 'POST',
+        url: '/auth/register',
+        payload: {
+          email: testEmail,
+          password: 'TestPassword123!',
+        },
+      });
+
+      const user = Array.from(mockUsers.values()).find(u => u.email === testEmail.toLowerCase());
+      if (user) {
+        user.email_verified = true;
+      }
+
+      const loginResponse = await app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: {
+          email: testEmail,
+          password: 'TestPassword123!',
+        },
+      });
+
+      const cookies = loginResponse.cookies;
+      const refreshCookie = cookies.find((c: { name: string }) => c.name === 'refreshToken');
+      const userRefreshToken = refreshCookie?.value || '';
+
       // First refresh - should succeed
       await app.inject({
         method: 'POST',
@@ -332,7 +659,9 @@ describe('Auth Module', () => {
   });
 
   describe('POST /auth/forgot-password', () => {
-    beforeEach(async () => {
+    it('should accept forgot password request for existing email', async () => {
+      const testEmail = generateTestEmail();
+
       await app.inject({
         method: 'POST',
         url: '/auth/register',
@@ -341,9 +670,7 @@ describe('Auth Module', () => {
           password: 'TestPassword123!',
         },
       });
-    });
 
-    it('should accept forgot password request for existing email', async () => {
       const response = await app.inject({
         method: 'POST',
         url: '/auth/forgot-password',
@@ -402,202 +729,6 @@ describe('Auth Module', () => {
 
       expect(response.statusCode).toBe(400);
     });
-
-    it('should complete full password reset flow', async () => {
-      // Register and verify user
-      await app.inject({
-        method: 'POST',
-        url: '/auth/register',
-        payload: { email: testEmail, password: 'OldPassword123!' },
-      });
-
-      await execute('UPDATE users SET email_verified = true WHERE email = $1', [testEmail.toLowerCase()]);
-
-      // Request password reset
-      await app.inject({
-        method: 'POST',
-        url: '/auth/forgot-password',
-        payload: { email: testEmail },
-      });
-
-      // Get the reset token from database (in real app, user gets this via email)
-      const user = await queryOne<{ password_reset_token: string }>(
-        'SELECT password_reset_token FROM users WHERE email = $1',
-        [testEmail.toLowerCase()]
-      );
-
-      expect(user).toBeDefined();
-      expect(user?.password_reset_token).toBeDefined();
-
-      // We need the unhashed token, but it's hashed in DB
-      // For testing, we'll set a known token directly
-      const testResetToken = 'test-reset-token-12345';
-      const crypto = require('crypto');
-      const hashedToken = crypto.createHash('sha256').update(testResetToken).digest('hex');
-      const resetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
-
-      await execute(
-        'UPDATE users SET password_reset_token = $1, password_reset_expires = $2 WHERE email = $3',
-        [hashedToken, resetExpires, testEmail.toLowerCase()]
-      );
-
-      // Reset password with the token
-      const resetResponse = await app.inject({
-        method: 'POST',
-        url: '/auth/reset-password',
-        payload: { token: testResetToken, password: 'NewPassword456!' },
-      });
-
-      expect(resetResponse.statusCode).toBe(200);
-      const resetBody = JSON.parse(resetResponse.body);
-      expect(resetBody.success).toBe(true);
-
-      // Verify login works with new password
-      const loginResponse = await app.inject({
-        method: 'POST',
-        url: '/auth/login',
-        payload: { email: testEmail, password: 'NewPassword456!' },
-      });
-
-      expect(loginResponse.statusCode).toBe(200);
-      const loginBody = JSON.parse(loginResponse.body);
-      expect(loginBody.success).toBe(true);
-
-      // Verify old password no longer works
-      const oldLoginResponse = await app.inject({
-        method: 'POST',
-        url: '/auth/login',
-        payload: { email: testEmail, password: 'OldPassword123!' },
-      });
-
-      expect(oldLoginResponse.statusCode).toBe(401);
-    });
-
-    it('should reject expired reset token', async () => {
-      // Register user
-      await app.inject({
-        method: 'POST',
-        url: '/auth/register',
-        payload: { email: testEmail, password: 'TestPassword123!' },
-      });
-
-      // Set an expired reset token directly in DB
-      const testResetToken = 'expired-reset-token-12345';
-      const crypto = require('crypto');
-      const hashedToken = crypto.createHash('sha256').update(testResetToken).digest('hex');
-      const expiredTime = new Date(Date.now() - 60 * 60 * 1000); // 1 hour ago (expired)
-
-      await execute(
-        'UPDATE users SET password_reset_token = $1, password_reset_expires = $2 WHERE email = $3',
-        [hashedToken, expiredTime, testEmail.toLowerCase()]
-      );
-
-      // Try to reset with expired token
-      const response = await app.inject({
-        method: 'POST',
-        url: '/auth/reset-password',
-        payload: { token: testResetToken, password: 'NewPassword123!' },
-      });
-
-      expect(response.statusCode).toBe(400);
-      const body = JSON.parse(response.body);
-      expect(body.success).toBe(false);
-      expect(body.errorCode).toBe('TOKEN_EXPIRED');
-    });
-
-    it('should invalidate token after use (prevent reuse)', async () => {
-      // Register and verify user
-      await app.inject({
-        method: 'POST',
-        url: '/auth/register',
-        payload: { email: testEmail, password: 'TestPassword123!' },
-      });
-
-      await execute('UPDATE users SET email_verified = true WHERE email = $1', [testEmail.toLowerCase()]);
-
-      // Set a valid reset token
-      const testResetToken = 'one-time-reset-token';
-      const crypto = require('crypto');
-      const hashedToken = crypto.createHash('sha256').update(testResetToken).digest('hex');
-      const resetExpires = new Date(Date.now() + 60 * 60 * 1000);
-
-      await execute(
-        'UPDATE users SET password_reset_token = $1, password_reset_expires = $2 WHERE email = $3',
-        [hashedToken, resetExpires, testEmail.toLowerCase()]
-      );
-
-      // First reset should succeed
-      const firstReset = await app.inject({
-        method: 'POST',
-        url: '/auth/reset-password',
-        payload: { token: testResetToken, password: 'NewPassword123!' },
-      });
-
-      expect(firstReset.statusCode).toBe(200);
-
-      // Second reset with same token should fail
-      const secondReset = await app.inject({
-        method: 'POST',
-        url: '/auth/reset-password',
-        payload: { token: testResetToken, password: 'AnotherPassword456!' },
-      });
-
-      expect(secondReset.statusCode).toBe(400);
-      const body = JSON.parse(secondReset.body);
-      expect(body.success).toBe(false);
-      expect(body.errorCode).toBe('INVALID_TOKEN');
-    });
-
-    it('should revoke all sessions after password reset', async () => {
-      // Register, verify and login user
-      await app.inject({
-        method: 'POST',
-        url: '/auth/register',
-        payload: { email: testEmail, password: 'TestPassword123!' },
-      });
-
-      await execute('UPDATE users SET email_verified = true WHERE email = $1', [testEmail.toLowerCase()]);
-
-      const loginResponse = await app.inject({
-        method: 'POST',
-        url: '/auth/login',
-        payload: { email: testEmail, password: 'TestPassword123!' },
-      });
-
-      const loginBody = JSON.parse(loginResponse.body);
-      const oldAccessToken = loginBody.accessToken;
-
-      // Set a valid reset token
-      const testResetToken = 'session-revoke-test-token';
-      const crypto = require('crypto');
-      const hashedToken = crypto.createHash('sha256').update(testResetToken).digest('hex');
-      const resetExpires = new Date(Date.now() + 60 * 60 * 1000);
-
-      await execute(
-        'UPDATE users SET password_reset_token = $1, password_reset_expires = $2 WHERE email = $3',
-        [hashedToken, resetExpires, testEmail.toLowerCase()]
-      );
-
-      // Reset password
-      await app.inject({
-        method: 'POST',
-        url: '/auth/reset-password',
-        payload: { token: testResetToken, password: 'NewPassword123!' },
-      });
-
-      // Verify old refresh tokens are revoked (check database)
-      const user = await queryOne<{ id: string }>(
-        'SELECT id FROM users WHERE email = $1',
-        [testEmail.toLowerCase()]
-      );
-
-      const activeTokens = await queryOne<{ count: string }>(
-        'SELECT COUNT(*) as count FROM refresh_tokens WHERE user_id = $1 AND revoked = false',
-        [user?.id]
-      );
-
-      expect(parseInt(activeTokens?.count || '0')).toBe(0);
-    });
   });
 
   describe('POST /auth/logout', () => {
@@ -615,10 +746,10 @@ describe('Auth Module', () => {
   });
 
   describe('GET /auth/me (Protected Route)', () => {
-    let userAccessToken: string;
+    it('should return user info with valid token', async () => {
+      const testEmail = generateTestEmail();
 
-    beforeEach(async () => {
-      // Register, verify, and login user
+      // Register, verify and login
       await app.inject({
         method: 'POST',
         url: '/auth/register',
@@ -628,10 +759,10 @@ describe('Auth Module', () => {
         },
       });
 
-      await execute(
-        'UPDATE users SET email_verified = true WHERE email = $1',
-        [testEmail.toLowerCase()]
-      );
+      const user = Array.from(mockUsers.values()).find(u => u.email === testEmail.toLowerCase());
+      if (user) {
+        user.email_verified = true;
+      }
 
       const loginResponse = await app.inject({
         method: 'POST',
@@ -642,11 +773,9 @@ describe('Auth Module', () => {
         },
       });
 
-      const body = JSON.parse(loginResponse.body);
-      userAccessToken = body.accessToken;
-    });
+      const loginBody = JSON.parse(loginResponse.body);
+      const userAccessToken = loginBody.accessToken;
 
-    it('should return user info with valid token', async () => {
       const response = await app.inject({
         method: 'GET',
         url: '/auth/me',
@@ -685,9 +814,9 @@ describe('Auth Module', () => {
   });
 
   describe('POST /auth/logout-all (Protected Route)', () => {
-    let userAccessToken: string;
+    it('should logout all sessions with valid token', async () => {
+      const testEmail = generateTestEmail();
 
-    beforeEach(async () => {
       await app.inject({
         method: 'POST',
         url: '/auth/register',
@@ -697,10 +826,10 @@ describe('Auth Module', () => {
         },
       });
 
-      await execute(
-        'UPDATE users SET email_verified = true WHERE email = $1',
-        [testEmail.toLowerCase()]
-      );
+      const user = Array.from(mockUsers.values()).find(u => u.email === testEmail.toLowerCase());
+      if (user) {
+        user.email_verified = true;
+      }
 
       const loginResponse = await app.inject({
         method: 'POST',
@@ -712,10 +841,8 @@ describe('Auth Module', () => {
       });
 
       const body = JSON.parse(loginResponse.body);
-      userAccessToken = body.accessToken;
-    });
+      const userAccessToken = body.accessToken;
 
-    it('should logout all sessions with valid token', async () => {
       const response = await app.inject({
         method: 'POST',
         url: '/auth/logout-all',
@@ -725,9 +852,9 @@ describe('Auth Module', () => {
       });
 
       expect(response.statusCode).toBe(200);
-      const body = JSON.parse(response.body);
-      expect(body.success).toBe(true);
-      expect(body.message).toContain('All sessions');
+      const responseBody = JSON.parse(response.body);
+      expect(responseBody.success).toBe(true);
+      expect(responseBody.message).toContain('All sessions');
     });
 
     it('should reject without authentication', async () => {

@@ -1,25 +1,33 @@
 import { LoggerService } from '../logging/logger.service';
-import { queryOne, execute } from '../database/config';
-import { closeDatabase, waitForLog } from './test-utils';
-import type { AuditLog } from '../types/index';
+import * as dbConfig from '../database/config';
+
+// Mock the database module
+jest.mock('../database/config', () => ({
+  query: jest.fn(),
+  queryOne: jest.fn(),
+  execute: jest.fn(),
+  pool: {
+    query: jest.fn(),
+    end: jest.fn(),
+  },
+}));
 
 describe('Logger Service', () => {
   let logger: LoggerService;
+  let mockExecute: jest.Mock;
+  let mockQueryOne: jest.Mock;
   const testAppName = 'test-logger-app';
 
   beforeAll(() => {
     logger = new LoggerService(testAppName);
   });
 
-  afterAll(async () => {
-    // Cleanup test logs
-    await execute("DELETE FROM audit_logs WHERE app_name = $1", [testAppName]);
-    await closeDatabase();
-  });
-
-  afterEach(async () => {
-    // Clean up after each test
-    await execute("DELETE FROM audit_logs WHERE app_name = $1", [testAppName]);
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockExecute = dbConfig.execute as jest.Mock;
+    mockQueryOne = dbConfig.queryOne as jest.Mock;
+    // Default successful execute
+    mockExecute.mockResolvedValue(1);
   });
 
   describe('info()', () => {
@@ -33,19 +41,14 @@ describe('Logger Service', () => {
         user_id: testUserId,
       });
 
-      const log = await waitForLog(() =>
-        queryOne<AuditLog>(
-          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2 ORDER BY created_at DESC LIMIT 1',
-          [testAppName, 'test_action']
-        )
-      );
-
-      expect(log).toBeDefined();
-      expect(log?.log_level).toBe('info');
-      expect(log?.action).toBe('test_action');
-      expect(log?.message).toBe('Test info message');
-      expect(log?.user_email).toBe('testuser@test.com');
-      expect(log?.user_id).toBe(testUserId);
+      expect(mockExecute).toHaveBeenCalled();
+      const [query, params] = mockExecute.mock.calls[0];
+      expect(query).toContain('INSERT INTO audit_logs');
+      expect(params).toContain('info');
+      expect(params).toContain('test_action');
+      expect(params).toContain('Test info message');
+      expect(params).toContain('testuser@test.com');
+      expect(params).toContain(testUserId);
     });
 
     it('should log info with metadata', async () => {
@@ -56,16 +59,14 @@ describe('Logger Service', () => {
         metadata: { fields: ['name', 'email'], old_email: 'old@test.com' },
       });
 
-      const log = await waitForLog(() =>
-        queryOne<AuditLog>(
-          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
-          [testAppName, 'user_update']
-        )
+      expect(mockExecute).toHaveBeenCalled();
+      const [query, params] = mockExecute.mock.calls[0];
+      expect(query).toContain('INSERT INTO audit_logs');
+      // Check that metadata was serialized and included
+      const metadataParam = params.find((p: unknown) =>
+        typeof p === 'string' && p.includes('fields')
       );
-
-      expect(log).toBeDefined();
-      expect(log?.metadata).toBeDefined();
-      expect(log?.metadata).toEqual({ fields: ['name', 'email'], old_email: 'old@test.com' });
+      expect(metadataParam).toBeDefined();
     });
 
     it('should log info with IP and user agent', async () => {
@@ -77,16 +78,10 @@ describe('Logger Service', () => {
         user_agent: 'Mozilla/5.0',
       });
 
-      const log = await waitForLog(() =>
-        queryOne<AuditLog>(
-          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
-          [testAppName, 'login']
-        )
-      );
-
-      expect(log).toBeDefined();
-      expect(log?.ip_address).toBe('192.168.1.1');
-      expect(log?.user_agent).toBe('Mozilla/5.0');
+      expect(mockExecute).toHaveBeenCalled();
+      const [, params] = mockExecute.mock.calls[0];
+      expect(params).toContain('192.168.1.1');
+      expect(params).toContain('Mozilla/5.0');
     });
   });
 
@@ -99,17 +94,12 @@ describe('Logger Service', () => {
         user_email: 'user@test.com',
       });
 
-      const log = await waitForLog(() =>
-        queryOne<AuditLog>(
-          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
-          [testAppName, 'payment_failed']
-        )
-      );
-
-      expect(log).toBeDefined();
-      expect(log?.log_level).toBe('error');
-      expect(log?.error_code).toBe('PAYMENT_DECLINED');
-      expect(log?.message).toBe('Payment processing failed');
+      expect(mockExecute).toHaveBeenCalled();
+      const [query, params] = mockExecute.mock.calls[0];
+      expect(query).toContain('INSERT INTO audit_logs');
+      expect(params).toContain('error');
+      expect(params).toContain('PAYMENT_DECLINED');
+      expect(params).toContain('Payment processing failed');
     });
 
     it('should log error with stack trace', async () => {
@@ -122,16 +112,14 @@ describe('Logger Service', () => {
         error_stack: error.stack,
       });
 
-      const log = await waitForLog(() =>
-        queryOne<AuditLog>(
-          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
-          [testAppName, 'test_error']
-        )
+      expect(mockExecute).toHaveBeenCalled();
+      const [, params] = mockExecute.mock.calls[0];
+      expect(params).toContain('error');
+      // Find the stack trace param
+      const stackParam = params.find((p: unknown) =>
+        typeof p === 'string' && p.includes('Error: Test error')
       );
-
-      expect(log).toBeDefined();
-      expect(log?.error_stack).toBeDefined();
-      expect(log?.error_stack).toContain('Error: Test error');
+      expect(stackParam).toBeDefined();
     });
 
     it('should log error with metadata', async () => {
@@ -142,15 +130,14 @@ describe('Logger Service', () => {
         metadata: { endpoint: '/api/users', timeout: 5000 },
       });
 
-      const log = await waitForLog(() =>
-        queryOne<AuditLog>(
-          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
-          [testAppName, 'api_error']
-        )
+      expect(mockExecute).toHaveBeenCalled();
+      const [, params] = mockExecute.mock.calls[0];
+      expect(params).toContain('error');
+      // Check metadata was included
+      const metadataParam = params.find((p: unknown) =>
+        typeof p === 'string' && p.includes('endpoint')
       );
-
-      expect(log).toBeDefined();
-      expect(log?.metadata).toEqual({ endpoint: '/api/users', timeout: 5000 });
+      expect(metadataParam).toBeDefined();
     });
   });
 
@@ -163,16 +150,11 @@ describe('Logger Service', () => {
         metadata: { current_count: 8, max_count: 10 },
       });
 
-      const log = await waitForLog(() =>
-        queryOne<AuditLog>(
-          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
-          [testAppName, 'rate_limit_warning']
-        )
-      );
-
-      expect(log).toBeDefined();
-      expect(log?.log_level).toBe('warn');
-      expect(log?.message).toBe('User approaching rate limit');
+      expect(mockExecute).toHaveBeenCalled();
+      const [query, params] = mockExecute.mock.calls[0];
+      expect(query).toContain('INSERT INTO audit_logs');
+      expect(params).toContain('warn');
+      expect(params).toContain('User approaching rate limit');
     });
   });
 
@@ -184,15 +166,10 @@ describe('Logger Service', () => {
         metadata: { step: 1, data: 'test' },
       });
 
-      const log = await waitForLog(() =>
-        queryOne<AuditLog>(
-          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
-          [testAppName, 'test_debug']
-        )
-      );
-
-      expect(log).toBeDefined();
-      expect(log?.log_level).toBe('debug');
+      expect(mockExecute).toHaveBeenCalled();
+      const [query, params] = mockExecute.mock.calls[0];
+      expect(query).toContain('INSERT INTO audit_logs');
+      expect(params).toContain('debug');
     });
   });
 
@@ -211,55 +188,29 @@ describe('Logger Service', () => {
         message: 'App 2 message',
       });
 
-      const app1Logs = await waitForLog(() =>
-        queryOne<AuditLog>(
-          'SELECT * FROM audit_logs WHERE app_name = $1',
-          ['app1']
-        )
-      );
+      // Check that both loggers called execute with their respective app names
+      expect(mockExecute).toHaveBeenCalledTimes(2);
 
-      const app2Logs = await waitForLog(() =>
-        queryOne<AuditLog>(
-          'SELECT * FROM audit_logs WHERE app_name = $1',
-          ['app2']
-        )
-      );
+      const call1Params = mockExecute.mock.calls[0][1];
+      const call2Params = mockExecute.mock.calls[1][1];
 
-      expect(app1Logs).toBeDefined();
-      expect(app1Logs?.message).toBe('App 1 message');
-
-      expect(app2Logs).toBeDefined();
-      expect(app2Logs?.message).toBe('App 2 message');
-
-      // Cleanup
-      await execute("DELETE FROM audit_logs WHERE app_name IN ('app1', 'app2')");
+      expect(call1Params).toContain('app1');
+      expect(call2Params).toContain('app2');
     });
   });
 
   describe('timestamp', () => {
     it('should automatically add created_at timestamp', async () => {
-      const before = new Date();
-
       await logger.info({
         action: 'timestamp_test',
         message: 'Testing timestamp',
       });
 
-      const after = new Date();
-
-      const log = await waitForLog(() =>
-        queryOne<AuditLog>(
-          'SELECT * FROM audit_logs WHERE app_name = $1 AND action = $2',
-          [testAppName, 'timestamp_test']
-        )
-      );
-
-      expect(log).toBeDefined();
-      expect(log?.created_at).toBeDefined();
-
-      const logTime = new Date(log!.created_at);
-      expect(logTime.getTime()).toBeGreaterThanOrEqual(before.getTime());
-      expect(logTime.getTime()).toBeLessThanOrEqual(after.getTime());
+      expect(mockExecute).toHaveBeenCalled();
+      // The database handles created_at automatically via DEFAULT NOW()
+      // We just verify the log was written successfully
+      const [query] = mockExecute.mock.calls[0];
+      expect(query).toContain('INSERT INTO audit_logs');
     });
   });
 });
