@@ -25,6 +25,7 @@ export interface User {
   email_verification_expires: Date | null;
   password_reset_token: string | null;
   password_reset_expires: Date | null;
+  has_used_trial: boolean;
   created_at: Date;
   updated_at: Date;
 }

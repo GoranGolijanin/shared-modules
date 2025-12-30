@@ -386,8 +386,35 @@ export class SubscriptionService {
 
   /**
    * Assign a 14-day trial with Professional features to a new user
+   * Users can only receive one trial - subsequent calls will assign the default plan
    */
   async assignTrialPlan(userId: string): Promise<UserSubscription | null> {
+    // Check if user has already used their trial
+    const user = await queryOne<{ has_used_trial: boolean }>(
+      'SELECT has_used_trial FROM users WHERE id = $1',
+      [userId]
+    );
+
+    if (user?.has_used_trial) {
+      await this.logger.warn({
+        action: 'assign_trial_plan',
+        message: 'User has already used trial - assigning default plan instead',
+        user_id: userId,
+      });
+      return this.assignDefaultPlan(userId);
+    }
+
+    // Check if user already has an active subscription
+    const existingSubscription = await this.getUserSubscription(userId);
+    if (existingSubscription) {
+      await this.logger.info({
+        action: 'assign_trial_plan',
+        message: 'User already has active subscription',
+        user_id: userId,
+      });
+      return existingSubscription;
+    }
+
     const professionalPlan = await this.getPlanByName('professional');
 
     if (!professionalPlan) {
@@ -415,6 +442,12 @@ export class SubscriptionService {
          updated_at = CURRENT_TIMESTAMP
        RETURNING *`,
       [userId, professionalPlan.id, trialEndsAt]
+    );
+
+    // Mark the user as having used their trial
+    await execute(
+      'UPDATE users SET has_used_trial = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [userId]
     );
 
     await this.logger.info({

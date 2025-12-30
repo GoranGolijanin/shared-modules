@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
   email_verification_expires TIMESTAMP WITH TIME ZONE,
   password_reset_token VARCHAR(255),
   password_reset_expires TIMESTAMP WITH TIME ZONE,
+  has_used_trial BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -90,6 +91,10 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'user_subscriptions' AND column_name = 'trial_ends_at') THEN
     ALTER TABLE user_subscriptions ADD COLUMN trial_ends_at TIMESTAMP WITH TIME ZONE;
+  END IF;
+  -- Add has_used_trial column to users table (prevents multiple trials per user)
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'has_used_trial') THEN
+    ALTER TABLE users ADD COLUMN has_used_trial BOOLEAN DEFAULT FALSE;
   END IF;
 END $$;
 
