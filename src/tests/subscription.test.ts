@@ -133,10 +133,18 @@ describe('Subscription & Trial Module', () => {
         updated_at: new Date(),
       };
 
-      // Mock getPlanByName to return professional plan
+      // Mock sequence:
+      // 1. Check has_used_trial - return user with has_used_trial: false
+      // 2. getUserSubscription - return null (no existing subscription)
+      // 3. getPlanByName('professional') - return professional plan
+      // 4. INSERT - return subscription
       mockQueryOne
+        .mockResolvedValueOnce({ has_used_trial: false }) // Check has_used_trial
+        .mockResolvedValueOnce(null) // getUserSubscription - no existing
         .mockResolvedValueOnce(mockProfessionalPlan) // getPlanByName('professional')
         .mockResolvedValueOnce(mockSubscription); // INSERT ... RETURNING *
+
+      mockExecute.mockResolvedValueOnce(1); // Update has_used_trial
 
       const subscription = await subscriptionService.assignTrialPlan(userId);
 
@@ -151,9 +159,10 @@ describe('Subscription & Trial Module', () => {
       const beforeAssign = new Date();
 
       mockQueryOne
-        .mockResolvedValueOnce(mockProfessionalPlan)
+        .mockResolvedValueOnce({ has_used_trial: false }) // Check has_used_trial
+        .mockResolvedValueOnce(null) // getUserSubscription - no existing
+        .mockResolvedValueOnce(mockProfessionalPlan) // getPlanByName('professional')
         .mockImplementationOnce(async () => {
-          // Capture the trial_ends_at from the query parameters
           return {
             id: 'sub-id',
             user_id: userId,
@@ -164,6 +173,8 @@ describe('Subscription & Trial Module', () => {
             started_at: new Date(),
           };
         });
+
+      mockExecute.mockResolvedValueOnce(1); // Update has_used_trial
 
       const subscription = await subscriptionService.assignTrialPlan(userId);
 
@@ -180,9 +191,11 @@ describe('Subscription & Trial Module', () => {
       const userId = 'test-user-id';
 
       mockQueryOne
+        .mockResolvedValueOnce({ has_used_trial: false }) // Check has_used_trial
+        .mockResolvedValueOnce(null) // getUserSubscription - no existing
         .mockResolvedValueOnce(null) // getPlanByName('professional') returns null
-        .mockResolvedValueOnce(mockStarterPlan) // getPlanByName('starter')
-        .mockResolvedValueOnce({ // assignDefaultPlan result
+        .mockResolvedValueOnce(mockStarterPlan) // getPlanByName('starter') for fallback
+        .mockResolvedValueOnce({ // assignDefaultPlan INSERT result
           id: 'sub-id',
           user_id: userId,
           plan_id: mockStarterPlan.id,
@@ -195,6 +208,58 @@ describe('Subscription & Trial Module', () => {
       // Should have fallen back to default plan
       expect(subscription?.plan_id).toBe(mockStarterPlan.id);
     });
+
+    it('should return existing subscription if user already has one', async () => {
+      const userId = 'test-user-id';
+      const existingSubscription = {
+        id: 'existing-sub-id',
+        user_id: userId,
+        plan_id: mockStarterPlan.id,
+        status: 'active',
+        is_trial: false,
+        trial_ends_at: null,
+        plan_name: 'starter',
+        max_domains: 10,
+        max_team_members: 1,
+        check_interval_hours: 12,
+        api_requests_per_month: null,
+        sms_alerts_per_month: 0,
+        email_alerts: true,
+        slack_alerts: false,
+        plan_created_at: new Date(),
+      };
+
+      mockQueryOne
+        .mockResolvedValueOnce({ has_used_trial: false }) // Check has_used_trial
+        .mockResolvedValueOnce(existingSubscription); // getUserSubscription - has existing
+
+      const subscription = await subscriptionService.assignTrialPlan(userId);
+
+      // Should return existing subscription
+      expect(subscription).toBeDefined();
+      expect(subscription?.id).toBe('existing-sub-id');
+    });
+
+    it('should assign default plan if user has already used trial', async () => {
+      const userId = 'test-user-id';
+
+      mockQueryOne
+        .mockResolvedValueOnce({ has_used_trial: true }) // Check has_used_trial - already used
+        .mockResolvedValueOnce(mockStarterPlan) // getPlanByName('starter') for default plan
+        .mockResolvedValueOnce({ // assignDefaultPlan INSERT result
+          id: 'sub-id',
+          user_id: userId,
+          plan_id: mockStarterPlan.id,
+          status: 'active',
+          is_trial: false,
+        });
+
+      const subscription = await subscriptionService.assignTrialPlan(userId);
+
+      // Should have assigned default plan instead of trial
+      expect(subscription?.plan_id).toBe(mockStarterPlan.id);
+      expect(subscription?.is_trial).toBe(false);
+    });
   });
 
   describe('SubscriptionService.getTrialInfo', () => {
@@ -202,6 +267,7 @@ describe('Subscription & Trial Module', () => {
       const userId = 'test-user-id';
       const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days remaining
 
+      // getUserSubscription returns flattened JOIN result
       mockQueryOne.mockResolvedValueOnce({
         id: 'sub-id',
         user_id: userId,
@@ -209,7 +275,15 @@ describe('Subscription & Trial Module', () => {
         status: 'trial',
         is_trial: true,
         trial_ends_at: trialEndsAt,
-        plan: mockProfessionalPlan,
+        plan_name: 'professional',
+        max_domains: 40,
+        max_team_members: 5,
+        check_interval_hours: 6,
+        api_requests_per_month: 5000,
+        sms_alerts_per_month: 100,
+        email_alerts: true,
+        slack_alerts: true,
+        plan_created_at: new Date(),
       });
 
       const trialInfo = await subscriptionService.getTrialInfo(userId);
@@ -239,6 +313,7 @@ describe('Subscription & Trial Module', () => {
       const userId = 'test-user-id';
       const expiredDate = new Date(Date.now() - 24 * 60 * 60 * 1000); // Yesterday
 
+      // getUserSubscription returns flattened JOIN result
       mockQueryOne.mockResolvedValueOnce({
         id: 'sub-id',
         user_id: userId,
@@ -246,7 +321,15 @@ describe('Subscription & Trial Module', () => {
         status: 'trial',
         is_trial: true,
         trial_ends_at: expiredDate,
-        plan: mockProfessionalPlan,
+        plan_name: 'professional',
+        max_domains: 40,
+        max_team_members: 5,
+        check_interval_hours: 6,
+        api_requests_per_month: 5000,
+        sms_alerts_per_month: 100,
+        email_alerts: true,
+        slack_alerts: true,
+        plan_created_at: new Date(),
       });
 
       const trialInfo = await subscriptionService.getTrialInfo(userId);
@@ -255,10 +338,40 @@ describe('Subscription & Trial Module', () => {
       expect(trialInfo.isExpired).toBe(true);
       expect(trialInfo.daysRemaining).toBe(0);
     });
+
+    it('should return isOnTrial false for non-trial subscription', async () => {
+      const userId = 'test-user-id';
+
+      // User has active (paid) subscription, not trial
+      mockQueryOne.mockResolvedValueOnce({
+        id: 'sub-id',
+        user_id: userId,
+        plan_id: mockProfessionalPlan.id,
+        status: 'active',
+        is_trial: false,
+        trial_ends_at: null,
+        plan_name: 'professional',
+        max_domains: 40,
+        max_team_members: 5,
+        check_interval_hours: 6,
+        api_requests_per_month: 5000,
+        sms_alerts_per_month: 100,
+        email_alerts: true,
+        slack_alerts: true,
+        plan_created_at: new Date(),
+      });
+
+      const trialInfo = await subscriptionService.getTrialInfo(userId);
+
+      expect(trialInfo.isOnTrial).toBe(false);
+      expect(trialInfo.trialEndsAt).toBeNull();
+      expect(trialInfo.daysRemaining).toBe(0);
+      expect(trialInfo.isExpired).toBe(false);
+    });
   });
 
   describe('SubscriptionService.checkAndHandleTrialExpiration', () => {
-    it('should downgrade expired trial to Starter plan', async () => {
+    it('should set status to expired when trial expires', async () => {
       const userId = 'test-user-id';
       const expiredDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
@@ -271,15 +384,23 @@ describe('Subscription & Trial Module', () => {
           status: 'trial',
           is_trial: true,
           trial_ends_at: expiredDate,
-          plan: mockProfessionalPlan,
+          plan_name: 'professional',
+          max_domains: 40,
+          max_team_members: 5,
+          check_interval_hours: 6,
+          api_requests_per_month: 5000,
+          sms_alerts_per_month: 100,
+          email_alerts: true,
+          slack_alerts: true,
+          plan_created_at: new Date(),
         })
-        .mockResolvedValueOnce(mockStarterPlan); // getPlanByName('starter')
+        .mockResolvedValueOnce({ status: 'trial' }); // Check if already expired
 
       mockExecute.mockResolvedValueOnce(1); // UPDATE succeeded
 
-      const wasDowngraded = await subscriptionService.checkAndHandleTrialExpiration(userId);
+      const wasExpired = await subscriptionService.checkAndHandleTrialExpiration(userId);
 
-      expect(wasDowngraded).toBe(true);
+      expect(wasExpired).toBe(true);
       expect(mockExecute).toHaveBeenCalled();
     });
 
@@ -294,13 +415,52 @@ describe('Subscription & Trial Module', () => {
         status: 'trial',
         is_trial: true,
         trial_ends_at: activeTrialEnd,
-        plan: mockProfessionalPlan,
+        plan_name: 'professional',
+        max_domains: 40,
+        max_team_members: 5,
+        check_interval_hours: 6,
+        api_requests_per_month: 5000,
+        sms_alerts_per_month: 100,
+        email_alerts: true,
+        slack_alerts: true,
+        plan_created_at: new Date(),
       });
 
-      const wasDowngraded = await subscriptionService.checkAndHandleTrialExpiration(userId);
+      const wasExpired = await subscriptionService.checkAndHandleTrialExpiration(userId);
 
-      expect(wasDowngraded).toBe(false);
-      // Execute should not have been called for downgrade
+      expect(wasExpired).toBe(false);
+      // Execute should not have been called
+      expect(mockExecute).not.toHaveBeenCalled();
+    });
+
+    it('should return true if already marked as expired', async () => {
+      const userId = 'test-user-id';
+      const expiredDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      mockQueryOne
+        .mockResolvedValueOnce({
+          id: 'sub-id',
+          user_id: userId,
+          plan_id: mockProfessionalPlan.id,
+          status: 'trial',
+          is_trial: true,
+          trial_ends_at: expiredDate,
+          plan_name: 'professional',
+          max_domains: 40,
+          max_team_members: 5,
+          check_interval_hours: 6,
+          api_requests_per_month: 5000,
+          sms_alerts_per_month: 100,
+          email_alerts: true,
+          slack_alerts: true,
+          plan_created_at: new Date(),
+        })
+        .mockResolvedValueOnce({ status: 'expired' }); // Already expired
+
+      const wasExpired = await subscriptionService.checkAndHandleTrialExpiration(userId);
+
+      expect(wasExpired).toBe(true);
+      // Execute should NOT have been called since already expired
       expect(mockExecute).not.toHaveBeenCalled();
     });
   });
