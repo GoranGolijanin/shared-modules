@@ -98,6 +98,21 @@ BEGIN
   END IF;
 END $$;
 
+-- Update status check constraint to include 'trial' (for existing databases)
+DO $$
+BEGIN
+  -- Drop old constraint if it exists
+  IF EXISTS (SELECT 1 FROM information_schema.constraint_column_usage WHERE table_name = 'user_subscriptions' AND column_name = 'status') THEN
+    ALTER TABLE user_subscriptions DROP CONSTRAINT IF EXISTS user_subscriptions_status_check;
+  END IF;
+  -- Add updated constraint with 'trial' status
+  ALTER TABLE user_subscriptions ADD CONSTRAINT user_subscriptions_status_check
+    CHECK (status IN ('active', 'cancelled', 'expired', 'trial'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    NULL; -- Constraint already exists with correct definition
+END $$;
+
 -- Usage tracking table (monthly usage per user)
 CREATE TABLE IF NOT EXISTS usage_tracking (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

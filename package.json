@@ -9,9 +9,9 @@
     "build": "tsc",
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
-    "db:migrate": "tsx src/database/migrate.ts",
-    "db:seed": "tsx src/database/seed-plans.ts",
-    "db:setup": "npm run db:migrate && npm run db:seed",
+    "migrate": "tsx src/database/migrate.ts",
+    "seed": "tsx src/database/seed-plans.ts",
+    "db:setup": "npm run migrate && npm run seed",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"
