@@ -54,6 +54,7 @@ export class SubscriptionService {
 
   /**
    * Get user's current subscription with plan details
+   * Includes expired subscriptions so we can show the expired state
    */
   async getUserSubscription(userId: string): Promise<UserSubscriptionWithPlan | null> {
     const result = await queryOne<UserSubscription & SubscriptionPlan & { plan_name: string; plan_created_at: Date }>(
@@ -70,7 +71,7 @@ export class SubscriptionService {
         sp.created_at as plan_created_at
       FROM user_subscriptions us
       JOIN subscription_plans sp ON us.plan_id = sp.id
-      WHERE us.user_id = $1 AND us.status IN ('active', 'trial')`,
+      WHERE us.user_id = $1 AND us.status IN ('active', 'trial', 'expired')`,
       [userId]
     );
 
@@ -491,8 +492,9 @@ export class SubscriptionService {
   }
 
   /**
-   * Check if a trial is expired and handle downgrade to Starter
-   * Returns true if the trial was expired and downgraded
+   * Check if a trial is expired and handle the expiration
+   * Returns true if the trial was expired
+   * Note: Account becomes inactive until user upgrades to a paid plan
    */
   async checkAndHandleTrialExpiration(userId: string): Promise<boolean> {
     const trialInfo = await this.getTrialInfo(userId);
@@ -501,32 +503,57 @@ export class SubscriptionService {
       return false;
     }
 
-    // Downgrade to starter plan
-    const starterPlan = await this.getPlanByName('starter');
-    if (!starterPlan) {
-      await this.logger.error({
-        action: 'trial_expiration',
-        message: 'Cannot downgrade - Starter plan not found',
-        user_id: userId,
-      });
-      return false;
+    // Check if already marked as expired
+    const subscription = await queryOne<{ status: string }>(
+      'SELECT status FROM user_subscriptions WHERE user_id = $1',
+      [userId]
+    );
+
+    if (subscription?.status === 'expired') {
+      return true; // Already handled
     }
 
+    // Set status to 'expired' - account becomes inactive until upgrade
     await execute(
       `UPDATE user_subscriptions
-       SET plan_id = $1, status = 'active', is_trial = false, trial_ends_at = NULL, updated_at = CURRENT_TIMESTAMP
-       WHERE user_id = $2`,
-      [starterPlan.id, userId]
+       SET status = 'expired', is_trial = false, updated_at = CURRENT_TIMESTAMP
+       WHERE user_id = $1`,
+      [userId]
     );
 
     await this.logger.info({
       action: 'trial_expired',
-      message: 'Trial expired - downgraded to Starter plan',
+      message: 'Trial expired - account inactive until upgrade',
       user_id: userId,
-      metadata: { new_plan_id: starterPlan.id },
     });
 
     return true;
+  }
+
+  /**
+   * Check if user's account is active (not expired)
+   * Returns false if the trial has expired and user hasn't upgraded
+   */
+  async isAccountActive(userId: string): Promise<boolean> {
+    const subscription = await queryOne<{ status: string }>(
+      'SELECT status FROM user_subscriptions WHERE user_id = $1',
+      [userId]
+    );
+
+    if (!subscription) {
+      return false;
+    }
+
+    // Check if trial expired
+    await this.checkAndHandleTrialExpiration(userId);
+
+    // Re-fetch after potential status update
+    const updatedSubscription = await queryOne<{ status: string }>(
+      'SELECT status FROM user_subscriptions WHERE user_id = $1',
+      [userId]
+    );
+
+    return updatedSubscription?.status === 'active' || updatedSubscription?.status === 'trial';
   }
 
   /**
