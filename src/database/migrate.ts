@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_reset_token VARCHAR(255),
   password_reset_expires TIMESTAMP WITH TIME ZONE,
   has_used_trial BOOLEAN DEFAULT FALSE,
+  stripe_customer_id VARCHAR(255),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -95,6 +96,10 @@ BEGIN
   -- Add has_used_trial column to users table (prevents multiple trials per user)
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'has_used_trial') THEN
     ALTER TABLE users ADD COLUMN has_used_trial BOOLEAN DEFAULT FALSE;
+  END IF;
+  -- Add stripe_customer_id column to users table (for Stripe integration)
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'stripe_customer_id') THEN
+    ALTER TABLE users ADD COLUMN stripe_customer_id VARCHAR(255);
   END IF;
 END $$;
 
