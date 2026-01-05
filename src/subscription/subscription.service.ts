@@ -558,7 +558,8 @@ export class SubscriptionService {
 
   /**
    * Get plan limits with trial-specific overrides
-   * Trial users get Professional features but with reduced limits (10 domains, 10 SMS)
+   * Free trial users (Starter plan) get reduced limits (10 domains, 10 SMS)
+   * Paid plan trials (Professional, Enterprise) get their full plan limits
    */
   async getPlanLimitsWithTrialOverrides(userId: string): Promise<SubscriptionPlan & { isTrialLimited: boolean }> {
     // First check and handle any expired trials
@@ -580,8 +581,9 @@ export class SubscriptionService {
       created_at: new Date(),
     };
 
-    // Apply trial-specific limits
-    if (trialInfo.isOnTrial && !trialInfo.isExpired) {
+    // Apply trial-specific limits only to starter plan trials
+    // Professional/Enterprise trials should get their full plan limits
+    if (trialInfo.isOnTrial && !trialInfo.isExpired && plan.name === 'starter') {
       return {
         ...plan,
         max_domains: TRIAL_MAX_DOMAINS,
