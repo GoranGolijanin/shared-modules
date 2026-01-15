@@ -12,6 +12,7 @@ export {
   sendPasswordResetEmail,
   sendSSLExpiryAlert,
   sendDomainExpiryAlert,
+  sendRenewalConfirmationAlert,
 } from './email/brevo.js';
 export type { EmailOptions } from './email/brevo.js';
 

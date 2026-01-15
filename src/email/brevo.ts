@@ -265,3 +265,90 @@ export async function sendDomainExpiryAlert(
     textContent: `Domain Expiry Alert for ${domain}\n\n${urgencyText}\n\nDomain: ${domain}\nExpiry Date: ${formattedDate}\nDays Remaining: ${daysRemaining}\n\nIMPORTANT: If your domain expires and is not renewed, you may lose ownership of it permanently.\n\nView your dashboard: ${dashboardUrl}`,
   });
 }
+
+/**
+ * Send renewal confirmation alert email
+ * Uses green color (#10b981) to indicate success
+ */
+export async function sendRenewalConfirmationAlert(
+  email: string,
+  domain: string,
+  renewalType: string,
+  previousExpiryDate: Date,
+  newExpiryDate: Date,
+  appUrl: string
+): Promise<boolean> {
+  const dashboardUrl = `${appUrl}/dashboard`;
+
+  const formatDate = (date: Date) =>
+    date.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+
+  const previousFormattedDate = formatDate(previousExpiryDate);
+  const newFormattedDate = formatDate(newExpiryDate);
+
+  // Calculate how many days were added (with NaN protection)
+  const diffTime = newExpiryDate.getTime() - previousExpiryDate.getTime();
+  const daysAdded = isNaN(diffTime) ? 0 : Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  // Success/confirmation color - green
+  const successColor = '#10b981';
+
+  return sendEmail({
+    to: email,
+    subject: `${renewalType} Renewed: ${domain}`,
+    htmlContent: `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+          <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h1 style="color: ${successColor};">${renewalType} Renewed</h1>
+            <div style="background-color: #ecfdf5; border-left: 4px solid ${successColor}; padding: 15px; margin: 20px 0;">
+              <p style="margin: 0; font-weight: bold; color: ${successColor};">
+                Great news! Your ${renewalType.toLowerCase()} has been renewed.
+              </p>
+            </div>
+            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+              <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Domain:</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">${domain}</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Previous Expiry:</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; color: #666; text-decoration: line-through;">${previousFormattedDate}</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">New Expiry:</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; color: ${successColor}; font-weight: bold;">${newFormattedDate}</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Extended By:</td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">${daysAdded} days</td>
+              </tr>
+            </table>
+            <p>Your notification cycle has been reset for the new expiry date. You'll receive expiry reminders based on your notification preferences.</p>
+            <p style="text-align: center; margin: 30px 0;">
+              <a href="${dashboardUrl}"
+                 style="background-color: ${successColor}; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
+                View Dashboard
+              </a>
+            </p>
+            <p style="color: #666; font-size: 14px; margin-top: 30px;">
+              You're receiving this email because you have renewal notifications enabled for ${domain}.
+              To change your notification settings, visit your dashboard.
+            </p>
+          </div>
+        </body>
+      </html>
+    `,
+    textContent: `${renewalType} Renewed for ${domain}\n\nGreat news! Your ${renewalType.toLowerCase()} has been renewed.\n\nDomain: ${domain}\nPrevious Expiry: ${previousFormattedDate}\nNew Expiry: ${newFormattedDate}\nExtended By: ${daysAdded} days\n\nYour notification cycle has been reset for the new expiry date.\n\nView your dashboard: ${dashboardUrl}`,
+  });
+}
