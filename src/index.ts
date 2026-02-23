@@ -28,6 +28,8 @@ export { UsageService } from './usage/index.js';
 // Middleware exports
 export { planLimitsPlugin } from './middleware/index.js';
 export type { PlanLimitsPluginOptions } from './middleware/index.js';
+export { subscriptionStatusPlugin } from './middleware/index.js';
+export type { SubscriptionStatusPluginOptions } from './middleware/index.js';
 
 // Type exports
 export type {

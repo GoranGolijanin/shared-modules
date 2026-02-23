@@ -467,7 +467,20 @@ export class SubscriptionService {
   async getTrialInfo(userId: string): Promise<TrialInfo> {
     const subscription = await this.getUserSubscription(userId);
 
-    if (!subscription || !subscription.is_trial || !subscription.trial_ends_at) {
+    if (!subscription || !subscription.trial_ends_at) {
+      return {
+        isOnTrial: false,
+        trialEndsAt: null,
+        daysRemaining: 0,
+        isExpired: false,
+      };
+    }
+
+    // Detect expired trials: is_trial may be false after checkAndHandleTrialExpiration
+    // sets it to false, but status='expired' + trial_ends_at indicates a past trial
+    const wasOnTrial = subscription.is_trial || subscription.status === 'expired';
+
+    if (!wasOnTrial) {
       return {
         isOnTrial: false,
         trialEndsAt: null,
@@ -478,7 +491,7 @@ export class SubscriptionService {
 
     const now = new Date();
     const trialEndsAt = new Date(subscription.trial_ends_at);
-    const isExpired = now > trialEndsAt;
+    const isExpired = now > trialEndsAt || subscription.status === 'expired';
     const daysRemaining = isExpired
       ? 0
       : Math.ceil((trialEndsAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
