@@ -163,14 +163,16 @@ export class SubscriptionService {
     }
 
     const subscription = await queryOne<UserSubscription>(
-      `INSERT INTO user_subscriptions (user_id, plan_id, status, billing_cycle, stripe_subscription_id, started_at)
-       VALUES ($1, $2, 'active', $3, $4, CURRENT_TIMESTAMP)
+      `INSERT INTO user_subscriptions (user_id, plan_id, status, billing_cycle, stripe_subscription_id, started_at, is_trial, trial_ends_at)
+       VALUES ($1, $2, 'active', $3, $4, CURRENT_TIMESTAMP, false, NULL)
        ON CONFLICT (user_id) DO UPDATE SET
          plan_id = EXCLUDED.plan_id,
          status = 'active',
          billing_cycle = EXCLUDED.billing_cycle,
          stripe_subscription_id = EXCLUDED.stripe_subscription_id,
          started_at = CURRENT_TIMESTAMP,
+         is_trial = false,
+         trial_ends_at = NULL,
          updated_at = CURRENT_TIMESTAMP
        RETURNING *`,
       [userId, newPlanId, billingCycle || null, stripeSubscriptionId || null]
@@ -244,7 +246,7 @@ export class SubscriptionService {
    * This combines plan limits with current usage for easy comparison
    */
   async getUsageLimits(userId: string, domainCount: number, teamMemberCount: number): Promise<UsageLimits> {
-    const plan = await this.getPlanLimits(userId);
+    const plan = await this.getPlanLimitsWithTrialOverrides(userId);
     const currentMonth = this.getCurrentMonthYear();
 
     // Get current month's usage
