@@ -145,12 +145,14 @@ export function registerAuthRoutes(fastify: FastifyInstance, config: AuthConfig)
       }
 
       // Set refresh token as HTTP-only cookie
+      // Path must be '/' because the browser sees requests at /api/auth/* (via Next.js proxy)
+      // while the backend routes are at /auth/* — a path of '/auth' won't match '/api/auth/*'
       if (result.tokens) {
         reply.setCookie('refreshToken', result.tokens.refreshToken, {
           httpOnly: true,
           secure: process.env.NODE_ENV === 'production',
-          sameSite: 'strict',
-          path: '/auth',
+          sameSite: 'lax',
+          path: '/',
           maxAge: 7 * 24 * 60 * 60, // 7 days
         });
       }
@@ -179,7 +181,7 @@ export function registerAuthRoutes(fastify: FastifyInstance, config: AuthConfig)
       const result = await authService.refreshTokens(refreshToken);
 
       if (!result.success) {
-        reply.clearCookie('refreshToken', { path: '/auth' });
+        reply.clearCookie('refreshToken', { path: '/' });
         return reply.status(401).send(result);
       }
 
@@ -188,8 +190,8 @@ export function registerAuthRoutes(fastify: FastifyInstance, config: AuthConfig)
         reply.setCookie('refreshToken', result.tokens.refreshToken, {
           httpOnly: true,
           secure: process.env.NODE_ENV === 'production',
-          sameSite: 'strict',
-          path: '/auth',
+          sameSite: 'lax',
+          path: '/',
           maxAge: 7 * 24 * 60 * 60,
         });
       }
@@ -239,7 +241,7 @@ export function registerAuthRoutes(fastify: FastifyInstance, config: AuthConfig)
         await authService.logout(refreshToken);
       }
 
-      reply.clearCookie('refreshToken', { path: '/auth' });
+      reply.clearCookie('refreshToken', { path: '/' });
       return reply.send({ success: true, message: 'Logged out successfully' });
     }
   );
@@ -252,7 +254,7 @@ export function registerAuthRoutes(fastify: FastifyInstance, config: AuthConfig)
       const user = request.user as { userId: string };
       const result = await authService.logoutAll(user.userId);
 
-      reply.clearCookie('refreshToken', { path: '/auth' });
+      reply.clearCookie('refreshToken', { path: '/' });
       return reply.send(result);
     }
   );
