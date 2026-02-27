@@ -74,6 +74,7 @@ const refreshTokenSchema = {
 };
 
 export function registerAuthRoutes(fastify: FastifyInstance, config: AuthConfig) {
+  const useSecureCookies = config.appUrl.startsWith('https://');
   const logger = new LoggerService(config.appName);
   const authService = new AuthService(
     config,
@@ -150,7 +151,7 @@ export function registerAuthRoutes(fastify: FastifyInstance, config: AuthConfig)
       if (result.tokens) {
         reply.setCookie('refreshToken', result.tokens.refreshToken, {
           httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
+          secure: useSecureCookies,
           sameSite: 'lax',
           path: '/',
           maxAge: 7 * 24 * 60 * 60, // 7 days
@@ -189,7 +190,7 @@ export function registerAuthRoutes(fastify: FastifyInstance, config: AuthConfig)
       if (result.tokens) {
         reply.setCookie('refreshToken', result.tokens.refreshToken, {
           httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
+          secure: useSecureCookies,
           sameSite: 'lax',
           path: '/',
           maxAge: 7 * 24 * 60 * 60,
