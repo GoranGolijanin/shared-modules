@@ -17,14 +17,14 @@ import type {
 
 export class AuthService {
   private config: AuthConfig;
-  private signJwt: (payload: { userId: string; email: string }, options?: { expiresIn?: string }) => string;
+  private signJwt: (payload: { userId: string; email: string; admin?: boolean }, options?: { expiresIn?: string }) => string;
   private verifyJwt: (token: string) => JWTPayload;
   private logger: LoggerService;
   private subscriptionService: SubscriptionService;
 
   constructor(
     config: AuthConfig,
-    signJwt: (payload: { userId: string; email: string }, options?: { expiresIn?: string }) => string,
+    signJwt: (payload: { userId: string; email: string; admin?: boolean }, options?: { expiresIn?: string }) => string,
     verifyJwt: (token: string) => JWTPayload,
     logger: LoggerService
   ) {
@@ -304,9 +304,9 @@ export class AuthService {
     return { success: true, message: 'If your email is registered, you will receive a verification link' };
   }
 
-  async login(email: string, password: string): Promise<{ success: boolean; message: string; tokens?: AuthTokens; user?: { id: string; email: string }; errorCode?: AuthErrorCode; email?: string }> {
+  async login(email: string, password: string): Promise<{ success: boolean; message: string; tokens?: AuthTokens; user?: { id: string; email: string; admin?: boolean }; errorCode?: AuthErrorCode; email?: string }> {
     const user = await queryOne<User>(
-      'SELECT id, email, password_hash, email_verified FROM users WHERE email = $1',
+      'SELECT id, email, password_hash, email_verified, admin FROM users WHERE email = $1',
       [email.toLowerCase()]
     );
 
@@ -376,7 +376,7 @@ export class AuthService {
       }
     }
 
-    const tokens = await this.generateAuthTokens(user.id, user.email);
+    const tokens = await this.generateAuthTokens(user.id, user.email, user.admin);
 
     await this.logger.info({
       action: 'login',
@@ -389,7 +389,7 @@ export class AuthService {
       success: true,
       message: 'Login successful',
       tokens,
-      user: { id: user.id, email: user.email },
+      user: { id: user.id, email: user.email, admin: user.admin || undefined },
     };
   }
 
@@ -433,7 +433,7 @@ export class AuthService {
     await execute('UPDATE refresh_tokens SET revoked = true WHERE id = $1', [storedToken.id]);
 
     // Get user
-    const user = await queryOne<User>('SELECT id, email FROM users WHERE id = $1', [storedToken.user_id]);
+    const user = await queryOne<User>('SELECT id, email, admin FROM users WHERE id = $1', [storedToken.user_id]);
     if (!user) {
       return {
         success: false,
@@ -443,7 +443,7 @@ export class AuthService {
     }
 
     // Generate new tokens
-    const tokens = await this.generateAuthTokens(user.id, user.email);
+    const tokens = await this.generateAuthTokens(user.id, user.email, user.admin);
 
     return { success: true, message: 'Tokens refreshed', tokens };
   }
@@ -585,10 +585,12 @@ export class AuthService {
     return { success: true, message: 'Password reset successful. Please log in with your new password.' };
   }
 
-  private async generateAuthTokens(userId: string, email: string): Promise<AuthTokens> {
-    // Generate access token
+  private async generateAuthTokens(userId: string, email: string, admin?: boolean): Promise<AuthTokens> {
+    // Generate access token (only include admin claim when true to keep tokens small)
+    const payload: { userId: string; email: string; admin?: boolean } = { userId, email };
+    if (admin) payload.admin = true;
     const accessToken = this.signJwt(
-      { userId, email },
+      payload,
       { expiresIn: this.config.jwtExpiresIn }
     );
 

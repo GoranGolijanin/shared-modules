@@ -77,9 +77,9 @@ export function registerAuthRoutes(fastify: FastifyInstance, config: AuthConfig)
   const logger = new LoggerService(config.appName);
   const authService = new AuthService(
     config,
-    (payload: { userId: string; email: string }, options?: { expiresIn?: string }) =>
+    (payload: { userId: string; email: string; admin?: boolean }, options?: { expiresIn?: string }) =>
       fastify.jwt.sign(payload, options),
-    (token: string) => fastify.jwt.verify(token) as { userId: string; email: string },
+    (token: string) => fastify.jwt.verify(token) as { userId: string; email: string; admin?: boolean },
     logger
   );
 
@@ -264,7 +264,7 @@ export function registerAuthRoutes(fastify: FastifyInstance, config: AuthConfig)
     '/auth/me',
     { preHandler: [fastify.authenticate] },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      return reply.send({ success: true, user: request.user });
+      return reply.send({ success: true, data: request.user });
     }
   );
 }

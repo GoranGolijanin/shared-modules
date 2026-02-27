@@ -101,6 +101,10 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'stripe_customer_id') THEN
     ALTER TABLE users ADD COLUMN stripe_customer_id VARCHAR(255);
   END IF;
+  -- Add admin column to users table (for superadmin access)
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'admin') THEN
+    ALTER TABLE users ADD COLUMN admin BOOLEAN DEFAULT FALSE;
+  END IF;
 END $$;
 
 -- Update status check constraint to include 'trial' (for existing databases)

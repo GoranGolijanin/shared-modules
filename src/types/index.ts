@@ -26,6 +26,7 @@ export interface User {
   password_reset_token: string | null;
   password_reset_expires: Date | null;
   has_used_trial: boolean;
+  admin: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -87,6 +88,7 @@ export interface AuthTokens {
 export interface JWTPayload {
   userId: string;
   email: string;
+  admin?: boolean;
   iat?: number;
   exp?: number;
 }
