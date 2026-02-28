@@ -74,7 +74,9 @@ const refreshTokenSchema = {
 };
 
 export function registerAuthRoutes(fastify: FastifyInstance, config: AuthConfig) {
-  const useSecureCookies = config.appUrl.startsWith('https://');
+  const useSecureCookies = process.env.COOKIE_SECURE === 'false'
+    ? false
+    : config.appUrl.startsWith('https://');
   const logger = new LoggerService(config.appName);
   const authService = new AuthService(
     config,
