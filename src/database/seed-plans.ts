@@ -9,6 +9,8 @@ interface PlanConfig {
   sms_alerts_per_month: number | null;
   email_alerts: boolean;
   slack_alerts: boolean;
+  monthly_price_cents: number;
+  annual_price_cents: number;
 }
 
 /**
@@ -45,6 +47,8 @@ const plans: PlanConfig[] = [
     sms_alerts_per_month: 0, // No SMS for starter
     email_alerts: true,
     slack_alerts: false,
+    monthly_price_cents: 1900, // $19/month
+    annual_price_cents: 18000, // $15/month billed annually ($180/year)
   },
   {
     name: 'professional',
@@ -55,6 +59,8 @@ const plans: PlanConfig[] = [
     sms_alerts_per_month: 100,
     email_alerts: true,
     slack_alerts: true,
+    monthly_price_cents: 5900, // $59/month
+    annual_price_cents: 56400, // $47/month billed annually ($564/year)
   },
   {
     name: 'enterprise',
@@ -65,6 +71,8 @@ const plans: PlanConfig[] = [
     sms_alerts_per_month: null, // Unlimited
     email_alerts: true,
     slack_alerts: true,
+    monthly_price_cents: 14900, // $149/month
+    annual_price_cents: 0, // Custom pricing (contact sales)
   },
 ];
 
@@ -89,7 +97,9 @@ async function seedPlans() {
             api_requests_per_month = $5,
             sms_alerts_per_month = $6,
             email_alerts = $7,
-            slack_alerts = $8
+            slack_alerts = $8,
+            monthly_price_cents = $9,
+            annual_price_cents = $10
           WHERE name = $1`,
           [
             plan.name,
@@ -100,6 +110,8 @@ async function seedPlans() {
             plan.sms_alerts_per_month,
             plan.email_alerts,
             plan.slack_alerts,
+            plan.monthly_price_cents,
+            plan.annual_price_cents,
           ]
         );
         console.log(`  Updated plan: ${plan.name}`);
@@ -108,8 +120,9 @@ async function seedPlans() {
         await execute(
           `INSERT INTO subscription_plans
             (name, max_domains, max_team_members, check_interval_hours,
-             api_requests_per_month, sms_alerts_per_month, email_alerts, slack_alerts)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+             api_requests_per_month, sms_alerts_per_month, email_alerts, slack_alerts,
+             monthly_price_cents, annual_price_cents)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
           [
             plan.name,
             plan.max_domains,
@@ -119,6 +132,8 @@ async function seedPlans() {
             plan.sms_alerts_per_month,
             plan.email_alerts,
             plan.slack_alerts,
+            plan.monthly_price_cents,
+            plan.annual_price_cents,
           ]
         );
         console.log(`  Created plan: ${plan.name}`);

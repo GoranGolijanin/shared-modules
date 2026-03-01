@@ -105,6 +105,13 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'admin') THEN
     ALTER TABLE users ADD COLUMN admin BOOLEAN DEFAULT FALSE;
   END IF;
+  -- Add pricing columns to subscription_plans (for revenue analytics)
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'subscription_plans' AND column_name = 'monthly_price_cents') THEN
+    ALTER TABLE subscription_plans ADD COLUMN monthly_price_cents INTEGER DEFAULT 0;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'subscription_plans' AND column_name = 'annual_price_cents') THEN
+    ALTER TABLE subscription_plans ADD COLUMN annual_price_cents INTEGER DEFAULT 0;
+  END IF;
 END $$;
 
 -- Update status check constraint to include 'trial' (for existing databases)
