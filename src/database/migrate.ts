@@ -112,6 +112,10 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'subscription_plans' AND column_name = 'annual_price_cents') THEN
     ALTER TABLE subscription_plans ADD COLUMN annual_price_cents INTEGER DEFAULT 0;
   END IF;
+  -- Add disabled column to users table (for admin controls)
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'disabled') THEN
+    ALTER TABLE users ADD COLUMN disabled BOOLEAN DEFAULT FALSE;
+  END IF;
 END $$;
 
 -- Update status check constraint to include 'trial' (for existing databases)
