@@ -306,7 +306,7 @@ export class AuthService {
 
   async login(email: string, password: string): Promise<{ success: boolean; message: string; tokens?: AuthTokens; user?: { id: string; email: string; admin?: boolean }; errorCode?: AuthErrorCode; email?: string }> {
     const user = await queryOne<User>(
-      'SELECT id, email, password_hash, email_verified, admin FROM users WHERE email = $1',
+      'SELECT id, email, password_hash, email_verified, admin, COALESCE(disabled, false) AS disabled FROM users WHERE email = $1',
       [email.toLowerCase()]
     );
 
@@ -337,6 +337,20 @@ export class AuthService {
         success: false,
         message: 'Invalid email or password',
         errorCode: 'INVALID_CREDENTIALS' as AuthErrorCode,
+      };
+    }
+
+    if (user.disabled) {
+      await this.logger.warn({
+        action: 'login',
+        message: 'Login blocked - account disabled',
+        user_email: email.toLowerCase(),
+        user_id: user.id,
+      });
+      return {
+        success: false,
+        message: 'Your account has been disabled. Please contact support.',
+        errorCode: 'ACCOUNT_DISABLED' as AuthErrorCode,
       };
     }
 

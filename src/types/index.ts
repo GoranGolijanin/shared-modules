@@ -8,6 +8,7 @@ export enum AuthErrorCode {
   RATE_LIMIT_EXCEEDED = 'RATE_LIMIT_EXCEEDED',
   USER_NOT_FOUND = 'USER_NOT_FOUND',
   TOKEN_REUSE_DETECTED = 'TOKEN_REUSE_DETECTED',
+  ACCOUNT_DISABLED = 'ACCOUNT_DISABLED',
 }
 
 export interface AuthResponse {
@@ -27,6 +28,7 @@ export interface User {
   password_reset_expires: Date | null;
   has_used_trial: boolean;
   admin: boolean;
+  disabled: boolean;
   created_at: Date;
   updated_at: Date;
 }
