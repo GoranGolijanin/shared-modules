@@ -164,6 +164,7 @@ export function registerAuthRoutes(fastify: FastifyInstance, config: AuthConfig)
         success: true,
         message: result.message,
         accessToken: result.tokens?.accessToken,
+        refreshToken: result.tokens?.refreshToken,
         user: result.user,
       });
     }
@@ -203,6 +204,7 @@ export function registerAuthRoutes(fastify: FastifyInstance, config: AuthConfig)
         success: true,
         message: result.message,
         accessToken: result.tokens?.accessToken,
+        refreshToken: result.tokens?.refreshToken,
       });
     }
   );
