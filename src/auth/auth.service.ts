@@ -304,9 +304,9 @@ export class AuthService {
     return { success: true, message: 'If your email is registered, you will receive a verification link' };
   }
 
-  async login(email: string, password: string): Promise<{ success: boolean; message: string; tokens?: AuthTokens; user?: { id: string; email: string; admin?: boolean }; errorCode?: AuthErrorCode; email?: string }> {
+  async login(email: string, password: string): Promise<{ success: boolean; message: string; tokens?: AuthTokens; user?: { id: string; email: string; admin?: boolean; preferred_language?: string }; errorCode?: AuthErrorCode; email?: string }> {
     const user = await queryOne<User>(
-      'SELECT id, email, password_hash, email_verified, admin, COALESCE(disabled, false) AS disabled FROM users WHERE email = $1',
+      "SELECT id, email, password_hash, email_verified, admin, COALESCE(disabled, false) AS disabled, COALESCE(preferred_language, 'en') AS preferred_language FROM users WHERE email = $1",
       [email.toLowerCase()]
     );
 
@@ -403,11 +403,11 @@ export class AuthService {
       success: true,
       message: 'Login successful',
       tokens,
-      user: { id: user.id, email: user.email, admin: user.admin || undefined },
+      user: { id: user.id, email: user.email, admin: user.admin || undefined, preferred_language: user.preferred_language || 'en' },
     };
   }
 
-  async refreshTokens(refreshToken: string): Promise<{ success: boolean; message: string; tokens?: AuthTokens; errorCode?: AuthErrorCode }> {
+  async refreshTokens(refreshToken: string): Promise<{ success: boolean; message: string; tokens?: AuthTokens; preferred_language?: string; errorCode?: AuthErrorCode }> {
     const tokenHash = this.hashToken(refreshToken);
 
     const storedToken = await queryOne<RefreshToken>(
@@ -447,7 +447,7 @@ export class AuthService {
     await execute('UPDATE refresh_tokens SET revoked = true WHERE id = $1', [storedToken.id]);
 
     // Get user
-    const user = await queryOne<User>('SELECT id, email, admin FROM users WHERE id = $1', [storedToken.user_id]);
+    const user = await queryOne<User>("SELECT id, email, admin, COALESCE(preferred_language, 'en') AS preferred_language FROM users WHERE id = $1", [storedToken.user_id]);
     if (!user) {
       return {
         success: false,
@@ -459,7 +459,7 @@ export class AuthService {
     // Generate new tokens
     const tokens = await this.generateAuthTokens(user.id, user.email, user.admin);
 
-    return { success: true, message: 'Tokens refreshed', tokens };
+    return { success: true, message: 'Tokens refreshed', tokens, preferred_language: user.preferred_language || 'en' };
   }
 
   async logout(refreshToken: string): Promise<{ success: boolean; message: string }> {

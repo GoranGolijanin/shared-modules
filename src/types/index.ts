@@ -29,6 +29,7 @@ export interface User {
   has_used_trial: boolean;
   admin: boolean;
   disabled: boolean;
+  preferred_language: string;
   created_at: Date;
   updated_at: Date;
 }

@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { AuthService } from './auth.service.js';
 import { LoggerService } from '../logging/logger.service.js';
+import { queryOne, execute } from '../database/config.js';
 import type {
   RegisterRequest,
   LoginRequest,
@@ -205,6 +206,7 @@ export function registerAuthRoutes(fastify: FastifyInstance, config: AuthConfig)
         message: result.message,
         accessToken: result.tokens?.accessToken,
         refreshToken: result.tokens?.refreshToken,
+        preferred_language: result.preferred_language,
       });
     }
   );
@@ -269,7 +271,40 @@ export function registerAuthRoutes(fastify: FastifyInstance, config: AuthConfig)
     '/auth/me',
     { preHandler: [fastify.authenticate] },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      return reply.send({ success: true, data: request.user });
+      const { userId } = request.user as { userId: string };
+      const userRow = await queryOne<{ preferred_language: string }>(
+        "SELECT COALESCE(preferred_language, 'en') AS preferred_language FROM users WHERE id = $1",
+        [userId]
+      );
+      return reply.send({
+        success: true,
+        data: {
+          ...request.user as Record<string, unknown>,
+          preferred_language: userRow?.preferred_language || 'en',
+        },
+      });
+    }
+  );
+
+  // Update language preference
+  fastify.put<{ Body: { language: string } }>(
+    '/auth/language',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { userId } = request.user as { userId: string };
+      const { language } = request.body;
+
+      const supportedLocales = ['en', 'es', 'fr', 'zh', 'hi', 'ar', 'bn', 'pt', 'ru', 'ja', 'de'];
+      if (!language || !supportedLocales.includes(language)) {
+        return reply.status(400).send({ success: false, message: 'Unsupported language' });
+      }
+
+      await execute(
+        'UPDATE users SET preferred_language = $1 WHERE id = $2',
+        [language, userId]
+      );
+
+      return reply.send({ success: true, message: 'Language preference updated' });
     }
   );
 }

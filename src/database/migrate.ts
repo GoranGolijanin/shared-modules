@@ -116,6 +116,10 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'disabled') THEN
     ALTER TABLE users ADD COLUMN disabled BOOLEAN DEFAULT FALSE;
   END IF;
+  -- Add preferred_language column to users table (for i18n)
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'preferred_language') THEN
+    ALTER TABLE users ADD COLUMN preferred_language VARCHAR(10) DEFAULT 'en';
+  END IF;
 END $$;
 
 -- Update status check constraint to include 'trial' (for existing databases)
