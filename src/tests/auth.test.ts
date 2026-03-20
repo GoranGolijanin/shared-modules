@@ -787,8 +787,9 @@ describe('Auth Module', () => {
       expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.body);
       expect(body.success).toBe(true);
-      expect(body.user).toBeDefined();
-      expect(body.user.email).toBe(testEmail.toLowerCase());
+      expect(body.data).toBeDefined();
+      expect(body.data.email).toBe(testEmail.toLowerCase());
+      expect(body.data.preferred_language).toBe('en');
     });
 
     it('should reject request without token', async () => {
