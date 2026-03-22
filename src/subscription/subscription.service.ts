@@ -293,30 +293,27 @@ export class SubscriptionService {
   }
 
   /**
-   * Check if user can add more domains
+   * Generic resource limit check.
+   * @param userId - user to check
+   * @param currentCount - current number of resources the user has
+   * @param resourceField - column name on subscription_plans table (default: 'max_domains')
    */
-  async canAddDomain(userId: string, currentDomainCount: number): Promise<boolean> {
+  async canAddResource(userId: string, currentCount: number, resourceField: string = 'max_domains'): Promise<boolean> {
     const plan = await this.getPlanLimitsWithTrialOverrides(userId);
-
-    // Enterprise is unlimited
-    if (plan.name.toLowerCase() === 'enterprise') {
-      return true;
-    }
-
-    return currentDomainCount < plan.max_domains;
+    if (plan.name.toLowerCase() === 'enterprise') return true;
+    const limit = (plan as unknown as Record<string, unknown>)[resourceField];
+    if (typeof limit !== 'number') return true; // No limit defined for this resource
+    return currentCount < limit;
   }
 
-  /**
-   * Check if user can add more team members
-   */
+  /** @deprecated Use canAddResource(userId, count, 'max_domains') instead */
+  async canAddDomain(userId: string, currentDomainCount: number): Promise<boolean> {
+    return this.canAddResource(userId, currentDomainCount, 'max_domains');
+  }
+
+  /** @deprecated Use canAddResource(userId, count, 'max_team_members') instead */
   async canAddTeamMember(userId: string, currentTeamCount: number): Promise<boolean> {
-    const plan = await this.getPlanLimitsWithTrialOverrides(userId);
-
-    if (plan.name.toLowerCase() === 'enterprise') {
-      return true;
-    }
-
-    return currentTeamCount < plan.max_team_members;
+    return this.canAddResource(userId, currentTeamCount, 'max_team_members');
   }
 
   /**

@@ -130,6 +130,7 @@ export interface AuthConfig {
   refreshTokenExpiresIn: string;
   bcryptRounds: number;
   appUrl: string;
+  onEmailVerified?: (userId: string, email: string) => Promise<void>;
 }
 
 // ============================================
@@ -160,12 +161,14 @@ export enum PlanLimitErrorCode {
   SMS_LIMIT_REACHED = 'SMS_LIMIT_REACHED',
   API_LIMIT_REACHED = 'API_LIMIT_REACHED',
   FEATURE_NOT_AVAILABLE = 'FEATURE_NOT_AVAILABLE',
+  RESOURCE_LIMIT_REACHED = 'RESOURCE_LIMIT_REACHED',
 }
 
 export interface SubscriptionPlan {
   id: string;
   name: string;
   max_domains: number;
+  max_items?: number;  // Generic resource limit for non-domain apps
   max_team_members: number;
   check_interval_hours: number;
   api_requests_per_month: number | null;
@@ -232,6 +235,11 @@ export interface UsageLimits {
     limit: number;
     unlimited: boolean;
   };
+  items?: {
+    used: number;
+    limit: number;
+    unlimited: boolean;
+  };
   teamMembers: {
     used: number;
     limit: number;
@@ -261,4 +269,39 @@ export interface PlanLimitError {
   current?: number;
   limit?: number;
   upgradeUrl: string;
+}
+
+// ============================================
+// Ticket / Support Types
+// ============================================
+
+export type TicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
+export type TicketPriority = 'low' | 'medium' | 'high';
+
+export interface SupportTicket {
+  id: string;
+  user_id: string;
+  app_name: string;
+  category: string;
+  subject: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  created_at: Date;
+  updated_at: Date;
+  closed_at: Date | null;
+}
+
+export interface TicketMessage {
+  id: string;
+  ticket_id: string;
+  user_id: string;
+  is_admin: boolean;
+  message: string;
+  created_at: Date;
+}
+
+export interface SupportTicketWithMessages extends SupportTicket {
+  messages: TicketMessage[];
+  user_email?: string;
+  message_count?: number;
 }

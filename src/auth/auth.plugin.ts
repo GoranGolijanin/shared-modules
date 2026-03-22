@@ -28,6 +28,7 @@ export interface AuthPluginOptions {
   cookieSecret?: string;
   /** Prefix for auth routes (e.g., '/api' makes routes available at /api/auth/*) */
   routePrefix?: string;
+  onEmailVerified?: (userId: string, email: string) => Promise<void>;
 }
 
 async function authPluginFn(fastify: FastifyInstance, options: AuthPluginOptions) {
@@ -38,6 +39,7 @@ async function authPluginFn(fastify: FastifyInstance, options: AuthPluginOptions
     refreshTokenExpiresIn: options.refreshTokenExpiresIn || '7d',
     bcryptRounds: options.bcryptRounds || 12,
     appUrl: options.appUrl,
+    onEmailVerified: options.onEmailVerified,
   };
 
   // Register JWT plugin
@@ -57,6 +59,7 @@ async function authPluginFn(fastify: FastifyInstance, options: AuthPluginOptions
       await request.jwtVerify();
     } catch (err) {
       reply.status(401).send({ success: false, message: 'Unauthorized' });
+      throw err; // Stop hook chain — prevents subsequent handlers from sending a second reply
     }
   });
 

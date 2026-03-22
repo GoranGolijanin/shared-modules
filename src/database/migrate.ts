@@ -206,6 +206,43 @@ CREATE TRIGGER update_usage_tracking_updated_at
   BEFORE UPDATE ON usage_tracking
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
+
+-- Support tickets table (shared across all apps)
+CREATE TABLE IF NOT EXISTS support_tickets (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  app_name VARCHAR(100) NOT NULL,
+  category VARCHAR(50) NOT NULL,
+  subject VARCHAR(255) NOT NULL,
+  status VARCHAR(20) DEFAULT 'open' CHECK (status IN ('open', 'in_progress', 'resolved', 'closed')),
+  priority VARCHAR(10) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high')),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  closed_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON support_tickets(user_id);
+CREATE INDEX IF NOT EXISTS idx_support_tickets_app ON support_tickets(app_name);
+CREATE INDEX IF NOT EXISTS idx_support_tickets_status ON support_tickets(status);
+
+DROP TRIGGER IF EXISTS update_support_tickets_updated_at ON support_tickets;
+CREATE TRIGGER update_support_tickets_updated_at
+  BEFORE UPDATE ON support_tickets
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+-- Ticket messages table
+CREATE TABLE IF NOT EXISTS ticket_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  ticket_id UUID NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  is_admin BOOLEAN DEFAULT false,
+  message TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket ON ticket_messages(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_messages_created ON ticket_messages(created_at);
 `;
 
 async function migrate() {

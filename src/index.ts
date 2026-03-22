@@ -31,6 +31,11 @@ export type { PlanLimitsPluginOptions } from './middleware/index.js';
 export { subscriptionStatusPlugin } from './middleware/index.js';
 export type { SubscriptionStatusPluginOptions } from './middleware/index.js';
 
+// Ticket exports
+export { TicketService } from './ticket/index.js';
+export { ticketPlugin } from './ticket/index.js';
+export type { TicketPluginOptions } from './ticket/index.js';
+
 // Type exports
 export type {
   User,
@@ -67,4 +72,9 @@ export type {
   TeamMemberWithUser,
   UsageLimits,
   PlanLimitError,
+  SupportTicket,
+  TicketMessage,
+  SupportTicketWithMessages,
+  TicketStatus,
+  TicketPriority,
 } from './types/index.js';

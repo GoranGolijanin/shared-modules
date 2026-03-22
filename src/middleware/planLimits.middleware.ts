@@ -11,6 +11,7 @@ declare module 'fastify' {
   interface FastifyInstance {
     checkDomainLimit: (currentCount: number) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
     checkTeamLimit: (currentCount: number) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    checkResourceLimit: (resourceField: string, currentCount: number) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
     checkSmsLimit: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
     checkApiLimit: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
     checkSlackAccess: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -126,6 +127,42 @@ async function planLimitsPluginFn(
             `You have reached the maximum of ${plan.max_team_members} team members for your ${plan.name} plan.`,
             currentCount,
             plan.max_team_members,
+            upgradeUrl
+          )
+        );
+      }
+    };
+  });
+
+  /**
+   * Generic resource limit check
+   * Usage: { preHandler: [fastify.authenticate, fastify.checkResourceLimit('max_items', currentCount)] }
+   */
+  fastify.decorate('checkResourceLimit', function (resourceField: string, currentCount: number) {
+    return async function (request: FastifyRequest, reply: FastifyReply) {
+      if (!request.user?.userId) {
+        return reply.status(401).send({ success: false, message: 'Unauthorized' });
+      }
+
+      const canAdd = await subscriptionService.canAddResource(request.user.userId, currentCount, resourceField);
+
+      if (!canAdd) {
+        const plan = await subscriptionService.getPlanLimits(request.user.userId);
+        const limit = (plan as unknown as Record<string, unknown>)[resourceField] as number;
+
+        await logger.warn({
+          action: 'resource_limit_check',
+          message: `Resource limit reached for ${resourceField} (${currentCount}/${limit})`,
+          user_id: request.user.userId,
+          user_email: request.user.email,
+        });
+
+        return reply.status(403).send(
+          createLimitError(
+            PlanLimitErrorCode.RESOURCE_LIMIT_REACHED,
+            `You have reached the limit of ${limit} for your ${plan.name} plan.`,
+            currentCount,
+            limit,
             upgradeUrl
           )
         );

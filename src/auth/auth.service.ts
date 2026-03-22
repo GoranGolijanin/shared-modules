@@ -228,23 +228,27 @@ export class AuthService {
       [user.id]
     );
 
-    // Assign 14-day trial with Professional features to the newly verified user
+    // Post-verification hook (configurable per app, defaults to trial assignment)
     try {
-      await this.subscriptionService.assignTrialPlan(user.id);
+      if (this.config.onEmailVerified) {
+        await this.config.onEmailVerified(user.id, user.email);
+      } else {
+        // Default behavior: assign 14-day trial
+        await this.subscriptionService.assignTrialPlan(user.id);
+      }
       await this.logger.info({
-        action: 'assign_trial',
-        message: `14-day trial assigned to ${user.email}`,
+        action: 'email_verified_hook',
+        message: `Post-verification hook executed for ${user.email}`,
         user_email: user.email,
         user_id: user.id,
       });
-    } catch (trialError) {
-      // Log but don't fail the verification if trial assignment fails
+    } catch (hookError) {
       await this.logger.error({
-        action: 'assign_trial',
-        message: `Failed to assign trial to ${user.email}`,
+        action: 'email_verified_hook',
+        message: `Post-verification hook failed for ${user.email}`,
         user_email: user.email,
         user_id: user.id,
-        error_stack: trialError instanceof Error ? trialError.stack : undefined,
+        error_stack: hookError instanceof Error ? hookError.stack : undefined,
       });
     }
 
